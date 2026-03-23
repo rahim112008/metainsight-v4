@@ -11,31 +11,24 @@ import networkx as nx
 import requests
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, silhouette_score
+from sklearn.model_selection import train_test_split
 import warnings
 warnings.filterwarnings('ignore')
 
-# Attempt to import shap; if not available, fallback to simulation
-try:
-    import shap
-    SHAP_AVAILABLE = True
-except ImportError:
-    SHAP_AVAILABLE = False
-    st.warning("SHAP not installed. XAI module will use simulated values.")
-
 # ------------------------------
-# Custom CSS for dark theme
+# Configuration de la page
 # ------------------------------
 st.set_page_config(page_title="MetaInsight v4", layout="wide", initial_sidebar_state="auto")
+
+# CSS personnalisé (dark theme)
 st.markdown(
     """
     <style>
-    /* Dark theme */
     .stApp {
         background-color: #0A0E1A;
         color: #E8EDF5;
     }
-    /* Override default Streamlit colors */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #0A0E1A;
@@ -80,10 +73,6 @@ st.markdown(
         border-color: #2A3550;
         color: #E8EDF5;
     }
-    .css-1aumxhk {
-        background-color: #0A0E1A;
-    }
-    /* KPI cards */
     .kpi-card {
         background-color: #0F1525;
         border: 1px solid #2A3550;
@@ -109,11 +98,11 @@ st.markdown(
 )
 
 # ------------------------------
-# Data generation and handling
+# Fonctions de données
 # ------------------------------
 @st.cache_data
 def generate_demo_data():
-    """Generate 24 samples (6 environments x 4 replicates) with 10 taxa."""
+    """Génère 24 échantillons (6 environnements × 4 réplicats)."""
     environments = ["Sol aride", "Eau marine", "Gut", "Sol agricole", "Sédiments", "Biofilm"]
     taxa = [
         "Proteobacteria", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Archaea",
@@ -131,7 +120,6 @@ def generate_demo_data():
     for env in environments:
         base = base_profiles[env]
         for rep in range(4):
-            # Add Gaussian noise, then normalize to 100%
             noisy = np.array(base) + np.random.normal(0, 2, size=len(taxa))
             noisy = np.clip(noisy, 0, None)
             noisy = noisy / noisy.sum() * 100
@@ -139,23 +127,18 @@ def generate_demo_data():
             row = {"sample_id": sample_id, "environment": env}
             for i, tax in enumerate(taxa):
                 row[tax] = round(noisy[i], 2)
-            # Shannon entropy
             probs = noisy / 100.0
             row["shannon"] = round(entropy(probs, base=2), 3)
-            # Simulated classified reads percentage
             row["classified_pct"] = round(np.random.uniform(70, 99), 1)
             data.append(row)
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def process_uploaded_file(uploaded_file):
-    """Read CSV, ensure required columns, compute missing Shannon/classified_pct."""
+    """Charge et nettoie un fichier CSV utilisateur."""
     df = pd.read_csv(uploaded_file)
-    # Check for environment column
     if "environment" not in df.columns:
-        st.error("Uploaded file must contain an 'environment' column.")
+        st.error("Le fichier doit contenir une colonne 'environment'.")
         return None
-    # List of taxa (we assume column names match the 10 taxa, otherwise fill missing with 0)
     taxa = [
         "Proteobacteria", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Archaea",
         "Acidobacteria", "Chloroflexi", "Planctomycetes", "Ascomycota", "Caudovirales"
@@ -163,22 +146,18 @@ def process_uploaded_file(uploaded_file):
     for tax in taxa:
         if tax not in df.columns:
             df[tax] = 0.0
-    # Compute Shannon if missing
     if "shannon" not in df.columns:
         df["shannon"] = df[taxa].apply(lambda row: entropy(row / row.sum(), base=2), axis=1)
-    # Simulate classified_pct if missing
     if "classified_pct" not in df.columns:
         df["classified_pct"] = np.random.uniform(70, 99, size=len(df)).round(1)
-    # Ensure sample_id exists
     if "sample_id" not in df.columns:
         df["sample_id"] = [f"SAMP_{i}" for i in range(len(df))]
     return df
 
 # ------------------------------
-# Helper functions for common plots
+# Fonctions graphiques
 # ------------------------------
 def plot_pca(df, taxa_cols, color_by="environment"):
-    """Return a Plotly scatter plot of PCA projection."""
     pca = PCA(n_components=2)
     pca_result = pca.fit_transform(df[taxa_cols])
     pca_df = pd.DataFrame(pca_result, columns=["PC1", "PC2"])
@@ -190,7 +169,6 @@ def plot_pca(df, taxa_cols, color_by="environment"):
     return fig
 
 def plot_radar(df, taxa_cols, env_col="environment"):
-    """Radar chart of average abundance per environment."""
     envs = df[env_col].unique()
     fig = go.Figure()
     for env in envs:
@@ -212,8 +190,7 @@ def plot_radar(df, taxa_cols, env_col="environment"):
     return fig
 
 def plot_attention_heatmap(tokens, n_heads):
-    """Return a matplotlib figure of random attention scores."""
-    # Simulate attention scores (random)
+    """Renvoie une figure matplotlib de la matrice d'attention simulée."""
     attn = np.random.rand(n_heads, len(tokens), len(tokens))
     fig, axes = plt.subplots(1, min(3, n_heads), figsize=(15, 5))
     if n_heads == 1:
@@ -225,10 +202,9 @@ def plot_attention_heatmap(tokens, n_heads):
     return fig
 
 # ------------------------------
-# Claude API call
+# Appel à l'API IA (Claude ou DeepSeek)
 # ------------------------------
 def call_claude(prompt, api_key):
-    """Call Claude API with given prompt."""
     headers = {
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01",
@@ -239,40 +215,72 @@ def call_claude(prompt, api_key):
         "max_tokens": 1000,
         "messages": [{"role": "user", "content": prompt}]
     }
-    try:
-        response = requests.post("https://api.anthropic.com/v1/messages", json=data, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-        return result["content"][0]["text"]
-    except Exception as e:
-        return f"Error calling Claude API: {str(e)}"
+    response = requests.post("https://api.anthropic.com/v1/messages", json=data, headers=headers)
+    response.raise_for_status()
+    result = response.json()
+    return result["content"][0]["text"]
+
+def call_deepseek(prompt, api_key):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 1000
+    }
+    response = requests.post("https://api.deepseek.com/v1/chat/completions", json=data, headers=headers)
+    response.raise_for_status()
+    result = response.json()
+    return result["choices"][0]["message"]["content"]
+
+def call_ai(prompt, claude_key=None, deepseek_key=None):
+    """Appelle Claude si disponible, sinon DeepSeek, sinon retourne un message d'erreur."""
+    if claude_key and claude_key.strip():
+        try:
+            return call_claude(prompt, claude_key)
+        except Exception as e:
+            st.warning(f"Erreur avec Claude : {e}. Tentative avec DeepSeek...")
+    if deepseek_key and deepseek_key.strip():
+        try:
+            return call_deepseek(prompt, deepseek_key)
+        except Exception as e:
+            st.error(f"Erreur avec DeepSeek : {e}")
+            return "Impossible de contacter l'API. Vérifiez vos clés."
+    else:
+        return "Aucune clé API valide fournie. Veuillez entrer une clé Claude ou DeepSeek dans la barre latérale."
 
 # ------------------------------
-# Main app
+# Application principale
 # ------------------------------
 def main():
-    # Initialize session state
+    # Initialisation de session_state
     if "df" not in st.session_state:
         st.session_state.df = generate_demo_data()
-    if "api_key" not in st.session_state:
-        st.session_state.api_key = ""
+    if "claude_key" not in st.session_state:
+        st.session_state.claude_key = ""
+    if "deepseek_key" not in st.session_state:
+        st.session_state.deepseek_key = ""
 
-    # Sidebar
+    # Barre latérale
     with st.sidebar:
         st.markdown("## 🔬 MetaInsight v4")
         st.markdown("---")
-        uploaded_file = st.file_uploader("Upload your own CSV", type=["csv"])
+        uploaded_file = st.file_uploader("Importer vos données (CSV)", type=["csv"])
         if uploaded_file is not None:
             df_uploaded = process_uploaded_file(uploaded_file)
             if df_uploaded is not None:
                 st.session_state.df = df_uploaded
-                st.success("Data loaded successfully!")
+                st.success("Données chargées !")
         if st.button("⚡ Charger données démo"):
             st.session_state.df = generate_demo_data()
-            st.success("Demo data loaded!")
+            st.success("Données de démonstration chargées !")
         st.markdown("---")
-        st.markdown("### Configuration")
-        st.session_state.api_key = st.text_input("Claude API Key (optional)", type="password", value=st.session_state.api_key)
+        st.markdown("### 🔑 Clés API (optionnelles)")
+        st.session_state.claude_key = st.text_input("Clé API Claude", type="password", value=st.session_state.claude_key)
+        st.session_state.deepseek_key = st.text_input("Clé API DeepSeek", type="password", value=st.session_state.deepseek_key)
+        st.info("Si les deux clés sont fournies, Claude est utilisé en priorité.")
 
     df = st.session_state.df
     taxa_cols = [col for col in df.columns if col in [
@@ -281,7 +289,7 @@ def main():
     ]]
     env_col = "environment"
 
-    # Create tabs in the required order
+    # Création des onglets (12)
     tab_names = [
         "🏠 Accueil", "🧬 DNABERT-2", "⚗️ Causal ML", "✨ GenAI", "🔒 Federated",
         "🔵 Clustering", "🌲 Random Forest", "⏱ LSTM", "🧩 VAE", "💡 XAI/SHAP",
@@ -289,7 +297,7 @@ def main():
     ]
     tabs = st.tabs(tab_names)
 
-    # ---------- Accueil ----------
+    # ==================== ACCUEIL ====================
     with tabs[0]:
         st.markdown("## MetaInsight v4")
         st.markdown("Plateforme métagénomique de pointe — Transformers génomiques · Causal ML · Generative AI · Federated Learning")
@@ -304,14 +312,14 @@ def main():
         with col4:
             st.markdown('<div class="kpi-card"><div class="kpi-value">6</div><div class="kpi-label">Nœuds fédérés</div><div style="font-size:0.7rem;">ε-DP privacy</div></div>', unsafe_allow_html=True)
 
-        # PCA and Radar
+        # Graphiques
         col1, col2 = st.columns(2)
         with col1:
             st.plotly_chart(plot_pca(df, taxa_cols, env_col), use_container_width=True)
         with col2:
             st.plotly_chart(plot_radar(df, taxa_cols, env_col), use_container_width=True)
 
-        # Comparison table
+        # Tableau comparatif
         st.markdown("### Apports de MetaInsight v4 — comparaison des modules")
         comp_data = [
             ["Limite v3", "Module v4", "Technique", "Amélioration", "Source"],
@@ -329,13 +337,12 @@ def main():
                     else:
                         st.write(cell)
 
-    # ---------- DNABERT-2 ----------
+    # ==================== DNABERT-2 ====================
     with tabs[1]:
         st.markdown("## 🧬 DNABERT-2")
         st.markdown("Transformer pré-entraîné sur séquences ADN — classification métagénomique au niveau de la séquence brute")
         with st.expander("ℹ️ Principe"):
             st.write("DNABERT-2 encode directement les reads ADN en tokens de 6-mers via un mécanisme d'attention multi-têtes (12 têtes, 768 dimensions cachées). Il atteint 96.8% de précision contre 91.3% pour Random Forest.")
-        # Configuration
         col1, col2 = st.columns(2)
         with col1:
             model_type = st.selectbox("Modèle", ["DNABERT-2 (BPE, 117M params)", "DNABERT-1 (k-mer=6, 86M params)", "Nucleotide Transformer (2.5B params)"])
@@ -343,14 +350,13 @@ def main():
             fine_tune = st.selectbox("Fine-tuning", ["Zero-shot (pré-entraîné)", "Fine-tune métagénomique", "Domain adaptation aride"])
             n_heads = st.slider("Têtes d'attention à visualiser", 1, 12, 3)
             if st.button("🚀 Classifier avec DNABERT-2"):
-                # Show metrics
                 st.success("Classification terminée")
                 col1_metric, col2_metric = st.columns(2)
                 with col1_metric:
                     st.metric("Précision", "96.8%", "+5.5%")
                 with col2_metric:
                     st.metric("Reads classifiés", "98.2%", "+?")
-                # Comparison bar chart
+                # Bar chart comparaison
                 methods = ['DNABERT-2 (v4)', 'RF (v3)', 'Kraken2', 'QIIME2', 'MEGAN', 'Bowtie2']
                 accuracies = [96.8, 91.3, 78.4, 82.1, 74.6, 68.9]
                 fig = px.bar(x=methods, y=accuracies, color=methods, title="Comparaison des méthodes de classification",
@@ -358,37 +364,36 @@ def main():
                 fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Précision (%)", yaxis_range=[60,100])
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Attention heatmap
+                # Heatmap d'attention
                 st.subheader("Visualisation des têtes d'attention")
                 tokens = ['ATG', 'GCT', 'AAC', 'TGG', 'CCG', 'ATG', 'TAC', 'GGC']
                 fig_attn = plot_attention_heatmap(tokens, n_heads)
                 st.pyplot(fig_attn)
 
-                # Token visualization
+                # Visualisation des tokens
                 st.subheader("Tokens ADN — séquence encodée")
                 seq = "ATGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGCTAGC"
                 tokens_seq = [seq[i:i+kmer] for i in range(0, len(seq)-kmer+1, kmer//2)]
                 importance = np.random.rand(len(tokens_seq))
-                # Display as colored spans
                 cols = st.columns(len(tokens_seq[:20]))
                 for i, tok in enumerate(tokens_seq[:20]):
                     with cols[i]:
                         st.markdown(f'<span style="background-color:rgba(0,212,170,{importance[i]*0.8+0.1}); padding:2px 6px; border-radius:4px; margin:2px;">{tok}</span>', unsafe_allow_html=True)
 
-                # AI Interpretation (if key present)
-                if st.session_state.api_key:
+                # Interprétation IA
+                if st.session_state.claude_key or st.session_state.deepseek_key:
                     prompt = f"""Expert métagénomique et Transformers. DNABERT-2 (117M params, BPE tokenizer, {kmer}-mers, {n_heads} têtes d'attention) atteint 96.8% de précision pour classer des reads métagénomiques. 
                     En 4 phrases scientifiques : (1) Pourquoi le mécanisme d'attention multi-têtes capture mieux les motifs évolutifs conservés qu'un k-mer classique, 
                     (2) Avantage du BPE (Byte-Pair Encoding) vs k-mer fixe pour les séquences métagénomiques, 
                     (3) Comment interpréter les têtes d'attention qui se focalisent sur différents patterns (codons, régions promotrices), 
                     (4) Limite principale : DNABERT-2 nécessite GPU et fine-tuning spécifique au sol aride."""
                     with st.spinner("Génération de l'interprétation..."):
-                        result = call_claude(prompt, st.session_state.api_key)
+                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                     st.info(result)
                 else:
-                    st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- Causal ML ----------
+    # ==================== CAUSAL ML ====================
     with tabs[2]:
         st.markdown("## ⚗️ Causal ML — Inférence causale microbienne")
         st.markdown("DAG + Do-calculus de Judea Pearl — distinguer les vraies causes des corrélations spurieuses")
@@ -402,9 +407,7 @@ def main():
             do_value = st.slider("Intensité Do-calculus", -50, 50, 30, step=5, format="%d%%")
             if st.button("🚀 Inférer le graphe causal"):
                 st.success("Inférence terminée")
-                # Show causal graph (simulated)
                 st.subheader("Graphe causal (DAG)")
-                # Create a simple DAG with networkx and plotly
                 G = nx.DiGraph()
                 nodes = ["Proteobacteria", "Archaea", "Firmicutes", "Acidobacteria", "Sécheresse", "Shannon H′"]
                 edges = [("Proteobacteria","Archaea"), ("Proteobacteria","Acidobacteria"), ("Sécheresse","Firmicutes"),
@@ -434,7 +437,6 @@ def main():
                 fig_ate.update_layout(showlegend=False, yaxis_title="Effet causal")
                 st.plotly_chart(fig_ate, use_container_width=True)
 
-                # Do-calculus result
                 st.subheader("Do-calculus — intervention simulée")
                 st.markdown(f"**P(Shannon H′ | do({intervention} {do_value:+d}%))**")
                 st.info(f"Effet causal estimé : **{ate_vals[0]:.2f}** σ\nIntervalle de confiance 95% : [{ate_vals[0]-0.18:.2f}, {ate_vals[0]+0.18:.2f}]")
@@ -450,8 +452,8 @@ def main():
                 }
                 st.table(pd.DataFrame(data_table))
 
-                # AI Interpretation
-                if st.session_state.api_key:
+                # Interprétation IA
+                if st.session_state.claude_key or st.session_state.deepseek_key:
                     prompt = f"""Expert causalité et microbiome (Do-calculus, graphes causaux). Intervention sur {intervention} (+{do_value}%), ATE sur Shannon H′ = {ate_vals[0]:.2f}. 
                     Le DAG révèle que Firmicutes corrèle avec Shannon H′ (ρ=0.68) mais l'effet causal ATE=0.03 est négligeable — confondant = Sécheresse. 
                     En 4 phrases : (1) Différence fondamentale entre P(Y|X) et P(Y|do(X)) en métagénomique, 
@@ -459,12 +461,12 @@ def main():
                     (3) Application concrète pour les sols arides : quels taxons cibler pour la bio-restauration, 
                     (4) Limite principale du PC-algorithm sur données compositionnelles (Aitchison)."""
                     with st.spinner("Génération de l'interprétation..."):
-                        result = call_claude(prompt, st.session_state.api_key)
+                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                     st.info(result)
                 else:
-                    st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- GenAI ----------
+    # ==================== GENAI ====================
     with tabs[3]:
         st.markdown("## ✨ Generative AI — Données métagénomiques synthétiques")
         st.markdown("Dirichlet-VAE · cGAN · Diffusion — augmentation de données pour environnements arides sous-représentés")
@@ -478,14 +480,12 @@ def main():
             temperature = st.slider("Température (diversité)", 0.1, 2.0, 0.8, step=0.1)
             fid_quality = st.selectbox("Contrôle qualité FID", ["Strict (FID < 5)", "Standard (FID < 10)", "Permissif (FID < 20)"])
             if st.button("✨ Générer les données synthétiques"):
-                # Simulate pipeline steps
                 with st.spinner("Pipeline de génération en cours..."):
                     progress_bar = st.progress(0)
                     for i in range(5):
                         progress_bar.progress((i+1)/5)
                     progress_bar.empty()
                 st.success(f"Génération terminée : {n_samples} échantillons synthétiques")
-                # KPIs
                 col_a, col_b, col_c = st.columns(3)
                 with col_a:
                     st.metric("Générés", f"{n_samples}", "✓")
@@ -493,9 +493,9 @@ def main():
                     st.metric("FID score", "3.2", "excellent")
                 with col_c:
                     st.metric("KL-divergence", "0.04", "faible")
+
                 # PCA plot
                 st.subheader("Données réelles vs synthétiques — comparaison PCA")
-                # Simulate PCA coordinates
                 np.random.seed(42)
                 real_pca = np.random.randn(24, 2)
                 synth_pca = np.random.randn(min(n_samples, 200), 2) * 0.9 + 0.2
@@ -505,7 +505,7 @@ def main():
                 fig_pca.update_layout(template="plotly_dark", title="PCA (réels vs synthétiques)", xaxis_title="PC1", yaxis_title="PC2")
                 st.plotly_chart(fig_pca, use_container_width=True)
 
-                # Bar chart: real vs synthetic abundances
+                # Bar chart
                 st.subheader("Distribution d'abondance — top 5 taxons")
                 taxa_top = ["Proteobacteria", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Archaea"]
                 real_avg = df[taxa_top].mean()
@@ -517,8 +517,8 @@ def main():
                 fig_bar.update_layout(barmode='group', template="plotly_dark", yaxis_title="Abondance moyenne (%)")
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-                # AI Interpretation
-                if st.session_state.api_key:
+                # Interprétation IA
+                if st.session_state.claude_key or st.session_state.deepseek_key:
                     prompt = f"""Expert GenAI et métagénomique. Dirichlet-VAE a généré {n_samples} profils métagénomiques synthétiques pour {target_env}. 
                     FID score = 3.2 (excellente fidélité), KL-divergence = 0.04. PCA montre une bonne couverture de l'espace réel. 
                     En 4 phrases : (1) Pourquoi un Dirichlet-VAE est adapté aux données compositionelles (simplex) vs un VAE standard, 
@@ -526,17 +526,17 @@ def main():
                     (3) Risques d'utiliser des données synthétiques pour l'entraînement (memorisation, mode collapse), 
                     (4) Impact concret : comment ces {n_samples} échantillons améliorent le RF de 91.3% → 95%+ en augmentation de données."""
                     with st.spinner("Génération de l'interprétation..."):
-                        result = call_claude(prompt, st.session_state.api_key)
+                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                     st.info(result)
                 else:
-                    st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- Federated Learning ----------
+    # ==================== FEDERATED LEARNING ====================
     with tabs[4]:
         st.markdown("## 🔒 Federated Learning — Collaboration sans fuite de données")
         st.markdown("FedAvg + Differential Privacy (ε-DP) — entraîner un modèle global sans partager les séquences brutes")
         with st.expander("ℹ️ Problème résolu"):
-            st.write("Chaque laboratoire garde ses données métagénomiques confidentielles (patients, brevets). Federated Learning entraîne un modèle partagé en n'échangeant que les gradients, avec un bruit différentiel ε-DP.")
+            st.write("Chaque laboratoire garde ses données métagénomiques confidentielles. Federated Learning entraîne un modèle partagé en n'échangeant que les gradients, avec un bruit différentiel ε-DP.")
         col1, col2 = st.columns(2)
         with col1:
             fed_algo = st.selectbox("Algorithme d'agrégation", ["FedAvg (McMahan 2017)", "FedProx (convergence hétérogène)", "SCAFFOLD (variance réduite)"])
@@ -575,7 +575,6 @@ def main():
 
                 # Privacy analysis
                 st.subheader("Analyse privacy — bruit différentiel appliqué")
-                # Simulate gradient distribution
                 x = np.linspace(-3, 3, 100)
                 raw_grad = np.exp(-x**2 / (2*1.2**2)) / (1.2 * np.sqrt(2*np.pi))
                 dp_grad = np.exp(-x**2 / (2*0.8**2)) / (0.8 * np.sqrt(2*np.pi))
@@ -585,8 +584,8 @@ def main():
                 fig_noise.update_layout(template="plotly_dark", title="Distribution des gradients", xaxis_title="Valeur", yaxis_title="Densité")
                 st.plotly_chart(fig_noise, use_container_width=True)
 
-                # AI Interpretation
-                if st.session_state.api_key:
+                # Interprétation IA
+                if st.session_state.claude_key or st.session_state.deepseek_key:
                     prompt = f"""Expert Federated Learning et privacy métagénomique. FedAvg sur {n_nodes} laboratoires, {rounds} rounds, epsilon-DP = {epsilon}. 
                     Modèle global atteint {final_global:.1f}% de précision vs {min(final_locals):.1f}-{max(final_locals):.1f}% pour les modèles locaux. 
                     En 4 phrases : (1) Pourquoi FedAvg améliore la généralisation même avec des données hétérogènes (non-IID) entre labos, 
@@ -594,18 +593,17 @@ def main():
                     (3) Application concrète pour la métagénomique algérienne : quels labos auraient le plus à gagner de la collaboration fédérée, 
                     (4) Limite : Byzantine faults (nœuds malveillants) et défense par gradient clipping + Krum aggregation."""
                     with st.spinner("Génération de l'interprétation..."):
-                        result = call_claude(prompt, st.session_state.api_key)
+                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                     st.info(result)
                 else:
-                    st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- Clustering ----------
+    # ==================== CLUSTERING ====================
     with tabs[5]:
         st.markdown("## 🔵 Clustering")
         st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
         k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
         if st.button("🚀 Lancer le clustering"):
-            # Use KMeans on PCA-reduced data
             pca = PCA(n_components=2)
             X_pca = pca.fit_transform(df[taxa_cols])
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
@@ -615,50 +613,45 @@ def main():
             fig = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster", title="Clusters sur projection PCA", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-            # Silhouette score
-            from sklearn.metrics import silhouette_score
             sil = silhouette_score(X_pca, clusters)
             st.metric("Silhouette Score", f"{sil:.3f}")
-            # AI Interpretation
-            if st.session_state.api_key:
+
+            if st.session_state.claude_key or st.session_state.deepseek_key:
                 prompt = f"""Expert métagénomique. K-means k={k} sur 24 échantillons multi-environnements, silhouette score = {sil:.3f}. 
                 En 3 phrases : signification biologique des clusters, interprétation du silhouette score, et une limite du k-means spécifique aux données métagénomiques (sparsité, compositionnalité) avec alternative recommandée."""
                 with st.spinner("Génération de l'interprétation..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.info(result)
             else:
-                st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- Random Forest ----------
+    # ==================== RANDOM FOREST ====================
     with tabs[6]:
         st.markdown("## 🌲 Random Forest")
         st.markdown("Classification supervisée de l'environnement source")
         if st.button("🚀 Entraîner"):
-            # Train RF
             X = df[taxa_cols]
             y = df[env_col]
-            from sklearn.model_selection import train_test_split
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
             rf = RandomForestClassifier(n_estimators=100, random_state=42)
             rf.fit(X_train, y_train)
             y_pred = rf.predict(X_test)
             acc = accuracy_score(y_test, y_pred)
             st.metric("Précision", f"{acc:.3f}")
-            # Feature importance
             importances = pd.Series(rf.feature_importances_, index=taxa_cols).sort_values(ascending=False)
             fig = px.bar(x=importances.values, y=importances.index, orientation='h', title="Importance des features (Gini)", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
-            # AI Interpretation
-            if st.session_state.api_key:
+
+            if st.session_state.claude_key or st.session_state.deepseek_key:
                 prompt = f"""Expert ML. Random Forest {acc:.1%} précision, top features : {importances.index[0]} ({importances.values[0]:.3f}), {importances.index[1]} ({importances.values[1]:.3f}), {importances.index[2]} ({importances.values[2]:.3f}). 
                 En 3 phrases : pourquoi ces taxons sont des biomarqueurs d'environnement, comment DNABERT-2 v4 améliore ce résultat (+5.5%), et une limite du RF pour les données métagénomiques."""
                 with st.spinner("Génération de l'interprétation..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.info(result)
             else:
-                st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- LSTM ----------
+    # ==================== LSTM ====================
     with tabs[7]:
         st.markdown("## ⏱ LSTM")
         st.markdown("Dynamique temporelle du microbiome")
@@ -666,10 +659,8 @@ def main():
         pred_months = st.slider("Prédiction (mois)", 1, 12, 3)
         perturbation = st.selectbox("Perturbation", ["Aucune", "Sécheresse", "Azote", "Antibiotiques"])
         if st.button("🚀 Modéliser"):
-            # Simulate time series
             time_points = np.arange(1, 13)
             observed = 22 + 8 * np.sin(time_points * np.pi / 6) + np.random.randn(12)*1.5
-            # Simulate prediction
             if perturbation == "Sécheresse":
                 trend = -0.5
             elif perturbation == "Azote":
@@ -687,77 +678,72 @@ def main():
             fig.add_trace(go.Scatter(x=full_time, y=full_pred, mode='lines+markers', name='Prédit LSTM', line=dict(dash='dash', color='#9B7CFF')))
             fig.update_layout(template="plotly_dark", title=f"Abondance de {taxon} au cours du temps", xaxis_title="Mois", yaxis_title="Abondance (%)")
             st.plotly_chart(fig, use_container_width=True)
-            # AI Interpretation
-            if st.session_state.api_key:
+
+            if st.session_state.claude_key or st.session_state.deepseek_key:
                 prompt = f"""LSTM prédit {taxon} sur {pred_months} mois. Perturbation : {perturbation}. 
                 En 3 phrases : avantage LSTM vs analyse statique, interprétation de la perturbation {perturbation} sur la communauté microbienne, et limite LSTM avec séries courtes."""
                 with st.spinner("Génération de l'interprétation..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.info(result)
             else:
-                st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- VAE ----------
+    # ==================== VAE ====================
     with tabs[8]:
         st.markdown("## 🧩 VAE Binning")
         st.markdown("Reconstruction de MAGs via autoencoder variationnel")
         if st.button("🚀 Lancer le binning"):
-            # Simulate latent space
-            from sklearn.decomposition import PCA
             X_pca = PCA(n_components=2).fit_transform(df[taxa_cols])
             fig = px.scatter(x=X_pca[:,0], y=X_pca[:,1], color=df[env_col], title="Espace latent VAE (simulation)", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
             st.success("47 MAGs reconstruits, dont 23 HQ (>90% complétude)")
-            # AI Interpretation
-            if st.session_state.api_key:
+
+            if st.session_state.claude_key or st.session_state.deepseek_key:
                 prompt = """VAE binning métagénomique a reconstruit 47 MAGs dont 23 HQ (>90% complétude). En 3 phrases : principe espace latent TNF+couverture, avantage sur MetaBAT2 pour sols arides, et comment ces 23 MAGs représentent des organismes inconnus à nommer."""
                 with st.spinner("Génération de l'interprétation..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.info(result)
             else:
-                st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- XAI/SHAP ----------
+    # ==================== XAI/SHAP ====================
     with tabs[9]:
         st.markdown("## 💡 XAI / SHAP")
         st.markdown("Explicabilité du modèle Random Forest")
         if st.button("🚀 Analyser"):
-            # Train RF for SHAP
             X = df[taxa_cols]
             y = df[env_col]
             rf = RandomForestClassifier(n_estimators=50, random_state=42)
             rf.fit(X, y)
-            if SHAP_AVAILABLE:
+            try:
+                import shap
                 explainer = shap.TreeExplainer(rf)
                 shap_values = explainer.shap_values(X)
-                # Plot summary
                 fig, ax = plt.subplots()
                 shap.summary_plot(shap_values, X, plot_type="bar", show=False)
                 st.pyplot(fig)
-            else:
-                # Simulated SHAP values
-                importances = np.random.rand(len(taxa_cols))
-                fig = px.bar(x=importances, y=taxa_cols, orientation='h', title="SHAP values (simulées)", template="plotly_dark")
+            except:
+                # Fallback: bar chart of feature importances
+                importances = rf.feature_importances_
+                fig = px.bar(x=importances, y=taxa_cols, orientation='h', title="Importance des features (simulée)", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
-            # AI Interpretation
-            if st.session_state.api_key:
+
+            if st.session_state.claude_key or st.session_state.deepseek_key:
                 prompt = """Expert XAI. Les valeurs SHAP montrent que Proteobacteria, Actinobacteriota et Firmicutes sont les principaux contributeurs à la prédiction de l'environnement. 
                 En 3 phrases : interprétation de ces importances, comment elles aident à comprendre les communautés microbiennes, et une limite de SHAP pour les données compositionnelles."""
                 with st.spinner("Génération de l'interprétation..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.info(result)
             else:
-                st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- GNN ----------
+    # ==================== GNN ====================
     with tabs[10]:
         st.markdown("## 🕸 GNN Interactions")
         st.markdown("Réseau d'interactions microbiennes via Graph Neural Network")
-        # Create a graph of co-occurrence (simulated)
         G = nx.Graph()
         for i, tax in enumerate(taxa_cols):
             G.add_node(tax)
-        # Add random edges
         for i in range(len(taxa_cols)):
             for j in range(i+1, len(taxa_cols)):
                 if np.random.rand() < 0.3:
@@ -777,28 +763,28 @@ def main():
                                  marker=dict(size=20, color='#00D4AA'), hoverinfo='text'))
         fig.update_layout(showlegend=False, title="Réseau d'interactions microbiennes", template="plotly_dark", xaxis_showgrid=False, yaxis_showgrid=False)
         st.plotly_chart(fig, use_container_width=True)
-        # AI Interpretation
-        if st.session_state.api_key:
+
+        if st.session_state.claude_key or st.session_state.deepseek_key:
             prompt = """Expert GNN. Le graphe montre les interactions potentielles entre taxons (co-occurrence). En 3 phrases : signification biologique des hubs (Proteobacteria, Firmicutes), comment les GNN peuvent prédire des interactions fonctionnelles, et une limite des graphes de co-occurrence (non causal)."""
             with st.spinner("Génération de l'interprétation..."):
-                result = call_claude(prompt, st.session_state.api_key)
+                result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
             st.info(result)
         else:
-            st.warning("Clé API non configurée. Ajoutez-la dans la barre latérale pour obtenir une interprétation IA.")
+            st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
-    # ---------- Rapport IA ----------
+    # ==================== RAPPORT IA ====================
     with tabs[11]:
         st.markdown("## 📄 Rapport IA — Synthèse MetaInsight v4")
-        st.markdown("Analyse intégrée des 12 modules par Claude")
+        st.markdown("Analyse intégrée des 12 modules par Claude ou DeepSeek")
         with st.form("report_form"):
             user_question = st.text_area("Votre question scientifique", value="Quels sont les apports réels de DNABERT-2 et du Causal ML par rapport aux méthodes v3 ? Que change le Federated Learning pour la métagénomique en Algérie ?")
             profile = st.selectbox("Profil", ["Chercheur métagénomique", "Étudiant bioinformatique", "Généticien", "Écologiste"])
             report_format = st.selectbox("Format", ["Rapport structuré (sections)", "Résumé exécutif", "Présentation scientifique"])
             modules_cover = st.selectbox("Modules à couvrir", ["Tous les modules v4 (recommandé)", "Nouveaux modules v4 uniquement", "Comparaison v3 vs v4"])
-            submitted = st.form_submit_button("🤖 Générer le rapport complet avec Claude")
+            submitted = st.form_submit_button("🤖 Générer le rapport complet")
         if submitted:
-            if not st.session_state.api_key:
-                st.error("Veuillez entrer votre clé API Anthropic dans la barre latérale.")
+            if not (st.session_state.claude_key or st.session_state.deepseek_key):
+                st.error("Veuillez entrer une clé API Claude ou DeepSeek dans la barre latérale.")
             else:
                 prompt = f"""Expert métagénomique senior. Niveau : {profile}. Format : {report_format}.
                 MetaInsight v4 — plateforme complète avec 12 modules ML/DL :
@@ -812,7 +798,7 @@ def main():
 
                 Rapport de 300-350 mots avec sections : Apports v4 · Découvertes biologiques clés · Impact pour la métagénomique algérienne · Limites v4 · Recommandations v5."""
                 with st.spinner("Génération du rapport..."):
-                    result = call_claude(prompt, st.session_state.api_key)
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
                 st.markdown("### Rapport généré")
                 st.info(result)
                 st.download_button("📥 Télécharger le rapport", result, file_name="metaInsight_v4_rapport.txt")
