@@ -21,7 +21,7 @@ warnings.filterwarnings('ignore')
 # ------------------------------
 st.set_page_config(page_title="MetaInsight v4", layout="wide", initial_sidebar_state="auto")
 
-# CSS personnalisé (dark theme)
+# CSS personnalisé (dark theme) – inchangé
 st.markdown(
     """
     <style>
@@ -98,7 +98,7 @@ st.markdown(
 )
 
 # ------------------------------
-# Fonctions de données
+# Fonctions de données (inchangées)
 # ------------------------------
 @st.cache_data
 def generate_demo_data():
@@ -155,7 +155,7 @@ def process_uploaded_file(uploaded_file):
     return df
 
 # ------------------------------
-# Fonctions graphiques
+# Fonctions graphiques (inchangées)
 # ------------------------------
 def plot_pca(df, taxa_cols, color_by="environment"):
     pca = PCA(n_components=2)
@@ -202,7 +202,7 @@ def plot_attention_heatmap(tokens, n_heads):
     return fig
 
 # ------------------------------
-# Appel à l'API IA (Claude ou DeepSeek)
+# Appel aux IA (multi‑fournisseurs)
 # ------------------------------
 def call_claude(prompt, api_key):
     headers = {
@@ -235,33 +235,90 @@ def call_deepseek(prompt, api_key):
     result = response.json()
     return result["choices"][0]["message"]["content"]
 
-def call_ai(prompt, claude_key=None, deepseek_key=None):
-    """Appelle Claude si disponible, sinon DeepSeek, sinon retourne un message d'erreur."""
-    if claude_key and claude_key.strip():
+def call_huggingface(prompt, api_key, model="mistralai/Mistral-7B-Instruct-v0.1"):
+    """Appelle l'API gratuite Hugging Face (token requis)."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7}
+    }
+    url = f"https://api-inference.huggingface.co/models/{model}"
+    response = requests.post(url, json=payload, headers=headers)
+    response.raise_for_status()
+    result = response.json()
+    # Le résultat peut être une liste avec 'generated_text'
+    if isinstance(result, list):
+        return result[0].get("generated_text", "Erreur : pas de texte généré")
+    else:
+        return result.get("generated_text", "Erreur")
+
+def call_ollama(prompt, model="llama3"):
+    """Appelle un modèle local via Ollama (service local)."""
+    url = "http://localhost:11434/api/generate"
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_predict": 500}
+    }
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        return result.get("response", "Erreur : réponse vide")
+    except requests.exceptions.ConnectionError:
+        return "Erreur : Ollama n'est pas accessible localement. Assurez-vous que le service est lancé (ollama serve)."
+    except Exception as e:
+        return f"Erreur avec Ollama : {str(e)}"
+
+def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_key=None, ollama_model="llama3"):
+    """Dispatch selon le fournisseur choisi."""
+    if provider == "Claude":
+        if not claude_key:
+            return "Clé API Claude manquante. Veuillez la renseigner dans la barre latérale."
         try:
             return call_claude(prompt, claude_key)
         except Exception as e:
-            st.warning(f"Erreur avec Claude : {e}. Tentative avec DeepSeek...")
-    if deepseek_key and deepseek_key.strip():
+            return f"Erreur Claude : {str(e)}"
+    elif provider == "DeepSeek":
+        if not deepseek_key:
+            return "Clé API DeepSeek manquante. Veuillez la renseigner dans la barre latérale."
         try:
             return call_deepseek(prompt, deepseek_key)
         except Exception as e:
-            st.error(f"Erreur avec DeepSeek : {e}")
-            return "Impossible de contacter l'API. Vérifiez vos clés."
+            return f"Erreur DeepSeek : {str(e)}"
+    elif provider == "Hugging Face":
+        if not huggingface_key:
+            return "Token Hugging Face manquant. Obtenez un token gratuit sur huggingface.co/settings/tokens."
+        try:
+            return call_huggingface(prompt, huggingface_key)
+        except Exception as e:
+            return f"Erreur Hugging Face : {str(e)}"
+    elif provider == "Ollama":
+        return call_ollama(prompt, ollama_model)
     else:
-        return "Aucune clé API valide fournie. Veuillez entrer une clé Claude ou DeepSeek dans la barre latérale."
+        return "Aucun fournisseur d'IA sélectionné. Veuillez en choisir un dans la barre latérale."
 
 # ------------------------------
 # Application principale
 # ------------------------------
 def main():
-    # Initialisation de session_state
+    # Initialisation session_state
     if "df" not in st.session_state:
         st.session_state.df = generate_demo_data()
     if "claude_key" not in st.session_state:
         st.session_state.claude_key = ""
     if "deepseek_key" not in st.session_state:
         st.session_state.deepseek_key = ""
+    if "huggingface_key" not in st.session_state:
+        st.session_state.huggingface_key = ""
+    if "ollama_model" not in st.session_state:
+        st.session_state.ollama_model = "llama3"
+    if "ai_provider" not in st.session_state:
+        st.session_state.ai_provider = "Ollama"   # Par défaut, gratuit local
 
     # Barre latérale
     with st.sidebar:
@@ -277,10 +334,35 @@ def main():
             st.session_state.df = generate_demo_data()
             st.success("Données de démonstration chargées !")
         st.markdown("---")
-        st.markdown("### 🔑 Clés API (optionnelles)")
-        st.session_state.claude_key = st.text_input("Clé API Claude", type="password", value=st.session_state.claude_key)
-        st.session_state.deepseek_key = st.text_input("Clé API DeepSeek", type="password", value=st.session_state.deepseek_key)
-        st.info("Si les deux clés sont fournies, Claude est utilisé en priorité.")
+        st.markdown("### 🤖 Configuration IA")
+        st.session_state.ai_provider = st.selectbox(
+            "Fournisseur d'IA",
+            ["Ollama (local, gratuit)", "Hugging Face (gratuit, token requis)", "Claude (API)", "DeepSeek (API)"],
+            index=0,
+            help="Ollama : modèle local gratuit (llama3, mistral...). Hugging Face : token gratuit sur huggingface.co."
+        )
+        # Normaliser le nom pour l'appel
+        provider_map = {
+            "Ollama (local, gratuit)": "Ollama",
+            "Hugging Face (gratuit, token requis)": "Hugging Face",
+            "Claude (API)": "Claude",
+            "DeepSeek (API)": "DeepSeek"
+        }
+        provider = provider_map[st.session_state.ai_provider]
+
+        if provider == "Claude":
+            st.session_state.claude_key = st.text_input("Clé API Claude", type="password", value=st.session_state.claude_key)
+        elif provider == "DeepSeek":
+            st.session_state.deepseek_key = st.text_input("Clé API DeepSeek", type="password", value=st.session_state.deepseek_key)
+        elif provider == "Hugging Face":
+            st.session_state.huggingface_key = st.text_input("Token Hugging Face", type="password", value=st.session_state.huggingface_key)
+            st.caption("Obtenez un token sur [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)")
+        elif provider == "Ollama":
+            st.session_state.ollama_model = st.text_input("Modèle Ollama", value=st.session_state.ollama_model, help="Ex: llama3, mistral, phi3")
+            st.caption("Assurez-vous que le service Ollama est lancé (ollama serve) et que le modèle est installé (ollama pull llama3).")
+
+        # Stockage du provider choisi dans session_state pour usage dans les modules
+        st.session_state.ai_provider_selected = provider
 
     df = st.session_state.df
     taxa_cols = [col for col in df.columns if col in [
@@ -289,7 +371,7 @@ def main():
     ]]
     env_col = "environment"
 
-    # Création des onglets (12)
+    # Création des onglets
     tab_names = [
         "🏠 Accueil", "🧬 DNABERT-2", "⚗️ Causal ML", "✨ GenAI", "🔒 Federated",
         "🔵 Clustering", "🌲 Random Forest", "⏱ LSTM", "🧩 VAE", "💡 XAI/SHAP",
@@ -381,17 +463,21 @@ def main():
                         st.markdown(f'<span style="background-color:rgba(0,212,170,{importance[i]*0.8+0.1}); padding:2px 6px; border-radius:4px; margin:2px;">{tok}</span>', unsafe_allow_html=True)
 
                 # Interprétation IA
-                if st.session_state.claude_key or st.session_state.deepseek_key:
-                    prompt = f"""Expert métagénomique et Transformers. DNABERT-2 (117M params, BPE tokenizer, {kmer}-mers, {n_heads} têtes d'attention) atteint 96.8% de précision pour classer des reads métagénomiques. 
-                    En 4 phrases scientifiques : (1) Pourquoi le mécanisme d'attention multi-têtes capture mieux les motifs évolutifs conservés qu'un k-mer classique, 
-                    (2) Avantage du BPE (Byte-Pair Encoding) vs k-mer fixe pour les séquences métagénomiques, 
-                    (3) Comment interpréter les têtes d'attention qui se focalisent sur différents patterns (codons, régions promotrices), 
-                    (4) Limite principale : DNABERT-2 nécessite GPU et fine-tuning spécifique au sol aride."""
-                    with st.spinner("Génération de l'interprétation..."):
-                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                    st.info(result)
-                else:
-                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+                prompt = f"""Expert métagénomique et Transformers. DNABERT-2 (117M params, BPE tokenizer, {kmer}-mers, {n_heads} têtes d'attention) atteint 96.8% de précision pour classer des reads métagénomiques. 
+                En 4 phrases scientifiques : (1) Pourquoi le mécanisme d'attention multi-têtes capture mieux les motifs évolutifs conservés qu'un k-mer classique, 
+                (2) Avantage du BPE (Byte-Pair Encoding) vs k-mer fixe pour les séquences métagénomiques, 
+                (3) Comment interpréter les têtes d'attention qui se focalisent sur différents patterns (codons, régions promotrices), 
+                (4) Limite principale : DNABERT-2 nécessite GPU et fine-tuning spécifique au sol aride."""
+                with st.spinner("Génération de l'interprétation..."):
+                    result = call_ai(
+                        prompt,
+                        st.session_state.ai_provider_selected,
+                        claude_key=st.session_state.claude_key,
+                        deepseek_key=st.session_state.deepseek_key,
+                        huggingface_key=st.session_state.huggingface_key,
+                        ollama_model=st.session_state.ollama_model
+                    )
+                st.info(result)
 
     # ==================== CAUSAL ML ====================
     with tabs[2]:
@@ -453,18 +539,22 @@ def main():
                 st.table(pd.DataFrame(data_table))
 
                 # Interprétation IA
-                if st.session_state.claude_key or st.session_state.deepseek_key:
-                    prompt = f"""Expert causalité et microbiome (Do-calculus, graphes causaux). Intervention sur {intervention} (+{do_value}%), ATE sur Shannon H′ = {ate_vals[0]:.2f}. 
-                    Le DAG révèle que Firmicutes corrèle avec Shannon H′ (ρ=0.68) mais l'effet causal ATE=0.03 est négligeable — confondant = Sécheresse. 
-                    En 4 phrases : (1) Différence fondamentale entre P(Y|X) et P(Y|do(X)) en métagénomique, 
-                    (2) Pourquoi Firmicutes est spurieux ici (fork causal via Sécheresse), 
-                    (3) Application concrète pour les sols arides : quels taxons cibler pour la bio-restauration, 
-                    (4) Limite principale du PC-algorithm sur données compositionnelles (Aitchison)."""
-                    with st.spinner("Génération de l'interprétation..."):
-                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                    st.info(result)
-                else:
-                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+                prompt = f"""Expert causalité et microbiome (Do-calculus, graphes causaux). Intervention sur {intervention} (+{do_value}%), ATE sur Shannon H′ = {ate_vals[0]:.2f}. 
+                Le DAG révèle que Firmicutes corrèle avec Shannon H′ (ρ=0.68) mais l'effet causal ATE=0.03 est négligeable — confondant = Sécheresse. 
+                En 4 phrases : (1) Différence fondamentale entre P(Y|X) et P(Y|do(X)) en métagénomique, 
+                (2) Pourquoi Firmicutes est spurieux ici (fork causal via Sécheresse), 
+                (3) Application concrète pour les sols arides : quels taxons cibler pour la bio-restauration, 
+                (4) Limite principale du PC-algorithm sur données compositionnelles (Aitchison)."""
+                with st.spinner("Génération de l'interprétation..."):
+                    result = call_ai(
+                        prompt,
+                        st.session_state.ai_provider_selected,
+                        claude_key=st.session_state.claude_key,
+                        deepseek_key=st.session_state.deepseek_key,
+                        huggingface_key=st.session_state.huggingface_key,
+                        ollama_model=st.session_state.ollama_model
+                    )
+                st.info(result)
 
     # ==================== GENAI ====================
     with tabs[3]:
@@ -518,18 +608,22 @@ def main():
                 st.plotly_chart(fig_bar, use_container_width=True)
 
                 # Interprétation IA
-                if st.session_state.claude_key or st.session_state.deepseek_key:
-                    prompt = f"""Expert GenAI et métagénomique. Dirichlet-VAE a généré {n_samples} profils métagénomiques synthétiques pour {target_env}. 
-                    FID score = 3.2 (excellente fidélité), KL-divergence = 0.04. PCA montre une bonne couverture de l'espace réel. 
-                    En 4 phrases : (1) Pourquoi un Dirichlet-VAE est adapté aux données compositionelles (simplex) vs un VAE standard, 
-                    (2) Validation statistique des données synthétiques (MMD, FID, Wasserstein distance), 
-                    (3) Risques d'utiliser des données synthétiques pour l'entraînement (memorisation, mode collapse), 
-                    (4) Impact concret : comment ces {n_samples} échantillons améliorent le RF de 91.3% → 95%+ en augmentation de données."""
-                    with st.spinner("Génération de l'interprétation..."):
-                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                    st.info(result)
-                else:
-                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+                prompt = f"""Expert GenAI et métagénomique. Dirichlet-VAE a généré {n_samples} profils métagénomiques synthétiques pour {target_env}. 
+                FID score = 3.2 (excellente fidélité), KL-divergence = 0.04. PCA montre une bonne couverture de l'espace réel. 
+                En 4 phrases : (1) Pourquoi un Dirichlet-VAE est adapté aux données compositionelles (simplex) vs un VAE standard, 
+                (2) Validation statistique des données synthétiques (MMD, FID, Wasserstein distance), 
+                (3) Risques d'utiliser des données synthétiques pour l'entraînement (memorisation, mode collapse), 
+                (4) Impact concret : comment ces {n_samples} échantillons améliorent le RF de 91.3% → 95%+ en augmentation de données."""
+                with st.spinner("Génération de l'interprétation..."):
+                    result = call_ai(
+                        prompt,
+                        st.session_state.ai_provider_selected,
+                        claude_key=st.session_state.claude_key,
+                        deepseek_key=st.session_state.deepseek_key,
+                        huggingface_key=st.session_state.huggingface_key,
+                        ollama_model=st.session_state.ollama_model
+                    )
+                st.info(result)
 
     # ==================== FEDERATED LEARNING ====================
     with tabs[4]:
@@ -585,18 +679,22 @@ def main():
                 st.plotly_chart(fig_noise, use_container_width=True)
 
                 # Interprétation IA
-                if st.session_state.claude_key or st.session_state.deepseek_key:
-                    prompt = f"""Expert Federated Learning et privacy métagénomique. FedAvg sur {n_nodes} laboratoires, {rounds} rounds, epsilon-DP = {epsilon}. 
-                    Modèle global atteint {final_global:.1f}% de précision vs {min(final_locals):.1f}-{max(final_locals):.1f}% pour les modèles locaux. 
-                    En 4 phrases : (1) Pourquoi FedAvg améliore la généralisation même avec des données hétérogènes (non-IID) entre labos, 
-                    (2) Garanties mathématiques de ε-DP (théorème de composition, privacy amplification by sampling), 
-                    (3) Application concrète pour la métagénomique algérienne : quels labos auraient le plus à gagner de la collaboration fédérée, 
-                    (4) Limite : Byzantine faults (nœuds malveillants) et défense par gradient clipping + Krum aggregation."""
-                    with st.spinner("Génération de l'interprétation..."):
-                        result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                    st.info(result)
-                else:
-                    st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+                prompt = f"""Expert Federated Learning et privacy métagénomique. FedAvg sur {n_nodes} laboratoires, {rounds} rounds, epsilon-DP = {epsilon}. 
+                Modèle global atteint {final_global:.1f}% de précision vs {min(final_locals):.1f}-{max(final_locals):.1f}% pour les modèles locaux. 
+                En 4 phrases : (1) Pourquoi FedAvg améliore la généralisation même avec des données hétérogènes (non-IID) entre labos, 
+                (2) Garanties mathématiques de ε-DP (théorème de composition, privacy amplification by sampling), 
+                (3) Application concrète pour la métagénomique algérienne : quels labos auraient le plus à gagner de la collaboration fédérée, 
+                (4) Limite : Byzantine faults (nœuds malveillants) et défense par gradient clipping + Krum aggregation."""
+                with st.spinner("Génération de l'interprétation..."):
+                    result = call_ai(
+                        prompt,
+                        st.session_state.ai_provider_selected,
+                        claude_key=st.session_state.claude_key,
+                        deepseek_key=st.session_state.deepseek_key,
+                        huggingface_key=st.session_state.huggingface_key,
+                        ollama_model=st.session_state.ollama_model
+                    )
+                st.info(result)
 
     # ==================== CLUSTERING ====================
     with tabs[5]:
@@ -604,26 +702,19 @@ def main():
         st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
         k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
         if st.button("🚀 Lancer le clustering"):
-            # PCA pour visualisation
             pca = PCA(n_components=2)
             X_pca = pca.fit_transform(df[taxa_cols])
-            # K-means
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
             clusters = kmeans.fit_predict(X_pca)
-            # Préparation du DataFrame pour le graphique
             df_clust = pd.DataFrame(X_pca, columns=["PC1", "PC2"])
             df_clust["Cluster"] = clusters.astype(str)
-            # Graphique des clusters
-            fig = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster",
-                             title="Clusters sur projection PCA", template="plotly_dark")
+            fig = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster", title="Clusters sur projection PCA", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-            # Calcul du silhouette score avec gestion d'erreur
             unique_labels = np.unique(clusters)
             if len(unique_labels) < 2:
                 st.warning("Moins de 2 clusters détectés. Impossible de calculer le silhouette score.")
             else:
-                # Vérifier si chaque cluster a au moins 2 échantillons
                 label_counts = np.bincount(clusters)
                 if np.any(label_counts < 2):
                     st.warning("Certains clusters ne contiennent qu'un seul échantillon. Le silhouette score peut être instable.")
@@ -633,17 +724,20 @@ def main():
                 except ValueError as e:
                     st.warning(f"Impossible de calculer le silhouette score : {e}")
 
-            # Interprétation IA (si clés API disponibles)
-            if st.session_state.claude_key or st.session_state.deepseek_key:
-                # On récupère le score s'il a été calculé, sinon on passe un message
-                sil_score_str = f"{sil:.3f}" if 'sil' in locals() else "non calculé"
-                prompt = f"""Expert métagénomique. K-means k={k} sur 24 échantillons multi-environnements, silhouette score = {sil_score_str}. 
-                En 3 phrases : signification biologique des clusters, interprétation du silhouette score, et une limite du k-means spécifique aux données métagénomiques (sparsité, compositionnalité) avec alternative recommandée."""
-                with st.spinner("Génération de l'interprétation..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.info(result)
-            else:
-                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            # Interprétation IA
+            sil_score_str = f"{sil:.3f}" if 'sil' in locals() else "non calculé"
+            prompt = f"""Expert métagénomique. K-means k={k} sur 24 échantillons multi-environnements, silhouette score = {sil_score_str}. 
+            En 3 phrases : signification biologique des clusters, interprétation du silhouette score, et une limite du k-means spécifique aux données métagénomiques (sparsité, compositionnalité) avec alternative recommandée."""
+            with st.spinner("Génération de l'interprétation..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.info(result)
 
     # ==================== RANDOM FOREST ====================
     with tabs[6]:
@@ -662,14 +756,18 @@ def main():
             fig = px.bar(x=importances.values, y=importances.index, orientation='h', title="Importance des features (Gini)", template="plotly_dark")
             st.plotly_chart(fig, use_container_width=True)
 
-            if st.session_state.claude_key or st.session_state.deepseek_key:
-                prompt = f"""Expert ML. Random Forest {acc:.1%} précision, top features : {importances.index[0]} ({importances.values[0]:.3f}), {importances.index[1]} ({importances.values[1]:.3f}), {importances.index[2]} ({importances.values[2]:.3f}). 
-                En 3 phrases : pourquoi ces taxons sont des biomarqueurs d'environnement, comment DNABERT-2 v4 améliore ce résultat (+5.5%), et une limite du RF pour les données métagénomiques."""
-                with st.spinner("Génération de l'interprétation..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.info(result)
-            else:
-                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            prompt = f"""Expert ML. Random Forest {acc:.1%} précision, top features : {importances.index[0]} ({importances.values[0]:.3f}), {importances.index[1]} ({importances.values[1]:.3f}), {importances.index[2]} ({importances.values[2]:.3f}). 
+            En 3 phrases : pourquoi ces taxons sont des biomarqueurs d'environnement, comment DNABERT-2 v4 améliore ce résultat (+5.5%), et une limite du RF pour les données métagénomiques."""
+            with st.spinner("Génération de l'interprétation..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.info(result)
 
     # ==================== LSTM ====================
     with tabs[7]:
@@ -699,14 +797,18 @@ def main():
             fig.update_layout(template="plotly_dark", title=f"Abondance de {taxon} au cours du temps", xaxis_title="Mois", yaxis_title="Abondance (%)")
             st.plotly_chart(fig, use_container_width=True)
 
-            if st.session_state.claude_key or st.session_state.deepseek_key:
-                prompt = f"""LSTM prédit {taxon} sur {pred_months} mois. Perturbation : {perturbation}. 
-                En 3 phrases : avantage LSTM vs analyse statique, interprétation de la perturbation {perturbation} sur la communauté microbienne, et limite LSTM avec séries courtes."""
-                with st.spinner("Génération de l'interprétation..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.info(result)
-            else:
-                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            prompt = f"""LSTM prédit {taxon} sur {pred_months} mois. Perturbation : {perturbation}. 
+            En 3 phrases : avantage LSTM vs analyse statique, interprétation de la perturbation {perturbation} sur la communauté microbienne, et limite LSTM avec séries courtes."""
+            with st.spinner("Génération de l'interprétation..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.info(result)
 
     # ==================== VAE ====================
     with tabs[8]:
@@ -718,13 +820,17 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
             st.success("47 MAGs reconstruits, dont 23 HQ (>90% complétude)")
 
-            if st.session_state.claude_key or st.session_state.deepseek_key:
-                prompt = """VAE binning métagénomique a reconstruit 47 MAGs dont 23 HQ (>90% complétude). En 3 phrases : principe espace latent TNF+couverture, avantage sur MetaBAT2 pour sols arides, et comment ces 23 MAGs représentent des organismes inconnus à nommer."""
-                with st.spinner("Génération de l'interprétation..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.info(result)
-            else:
-                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            prompt = """VAE binning métagénomique a reconstruit 47 MAGs dont 23 HQ (>90% complétude). En 3 phrases : principe espace latent TNF+couverture, avantage sur MetaBAT2 pour sols arides, et comment ces 23 MAGs représentent des organismes inconnus à nommer."""
+            with st.spinner("Génération de l'interprétation..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.info(result)
 
     # ==================== XAI/SHAP ====================
     with tabs[9]:
@@ -743,19 +849,22 @@ def main():
                 shap.summary_plot(shap_values, X, plot_type="bar", show=False)
                 st.pyplot(fig)
             except:
-                # Fallback: bar chart of feature importances
                 importances = rf.feature_importances_
                 fig = px.bar(x=importances, y=taxa_cols, orientation='h', title="Importance des features (simulée)", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True)
 
-            if st.session_state.claude_key or st.session_state.deepseek_key:
-                prompt = """Expert XAI. Les valeurs SHAP montrent que Proteobacteria, Actinobacteriota et Firmicutes sont les principaux contributeurs à la prédiction de l'environnement. 
-                En 3 phrases : interprétation de ces importances, comment elles aident à comprendre les communautés microbiennes, et une limite de SHAP pour les données compositionnelles."""
-                with st.spinner("Génération de l'interprétation..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.info(result)
-            else:
-                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            prompt = """Expert XAI. Les valeurs SHAP montrent que Proteobacteria, Actinobacteriota et Firmicutes sont les principaux contributeurs à la prédiction de l'environnement. 
+            En 3 phrases : interprétation de ces importances, comment elles aident à comprendre les communautés microbiennes, et une limite de SHAP pour les données compositionnelles."""
+            with st.spinner("Génération de l'interprétation..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.info(result)
 
     # ==================== GNN ====================
     with tabs[10]:
@@ -784,18 +893,22 @@ def main():
         fig.update_layout(showlegend=False, title="Réseau d'interactions microbiennes", template="plotly_dark", xaxis_showgrid=False, yaxis_showgrid=False)
         st.plotly_chart(fig, use_container_width=True)
 
-        if st.session_state.claude_key or st.session_state.deepseek_key:
-            prompt = """Expert GNN. Le graphe montre les interactions potentielles entre taxons (co-occurrence). En 3 phrases : signification biologique des hubs (Proteobacteria, Firmicutes), comment les GNN peuvent prédire des interactions fonctionnelles, et une limite des graphes de co-occurrence (non causal)."""
-            with st.spinner("Génération de l'interprétation..."):
-                result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-            st.info(result)
-        else:
-            st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+        prompt = """Expert GNN. Le graphe montre les interactions potentielles entre taxons (co-occurrence). En 3 phrases : signification biologique des hubs (Proteobacteria, Firmicutes), comment les GNN peuvent prédire des interactions fonctionnelles, et une limite des graphes de co-occurrence (non causal)."""
+        with st.spinner("Génération de l'interprétation..."):
+            result = call_ai(
+                prompt,
+                st.session_state.ai_provider_selected,
+                claude_key=st.session_state.claude_key,
+                deepseek_key=st.session_state.deepseek_key,
+                huggingface_key=st.session_state.huggingface_key,
+                ollama_model=st.session_state.ollama_model
+            )
+        st.info(result)
 
     # ==================== RAPPORT IA ====================
     with tabs[11]:
         st.markdown("## 📄 Rapport IA — Synthèse MetaInsight v4")
-        st.markdown("Analyse intégrée des 12 modules par Claude ou DeepSeek")
+        st.markdown("Analyse intégrée des 12 modules par IA (Claude, DeepSeek, Hugging Face ou Ollama)")
         with st.form("report_form"):
             user_question = st.text_area("Votre question scientifique", value="Quels sont les apports réels de DNABERT-2 et du Causal ML par rapport aux méthodes v3 ? Que change le Federated Learning pour la métagénomique en Algérie ?")
             profile = st.selectbox("Profil", ["Chercheur métagénomique", "Étudiant bioinformatique", "Généticien", "Écologiste"])
@@ -803,25 +916,29 @@ def main():
             modules_cover = st.selectbox("Modules à couvrir", ["Tous les modules v4 (recommandé)", "Nouveaux modules v4 uniquement", "Comparaison v3 vs v4"])
             submitted = st.form_submit_button("🤖 Générer le rapport complet")
         if submitted:
-            if not (st.session_state.claude_key or st.session_state.deepseek_key):
-                st.error("Veuillez entrer une clé API Claude ou DeepSeek dans la barre latérale.")
-            else:
-                prompt = f"""Expert métagénomique senior. Niveau : {profile}. Format : {report_format}.
-                MetaInsight v4 — plateforme complète avec 12 modules ML/DL :
-                [v4 NEW] DNABERT-2 : précision 96.8% (vs RF 91.3%), 117M params, BPE tokenizer, attention multi-têtes.
-                [v4 NEW] Causal ML : DAG PC-algorithm, Do-calculus Pearl. Proteobacteria → Shannon H′ causal (ATE=0.58), Firmicutes est spurieux (confondant=Sécheresse).
-                [v4 NEW] GenAI : Dirichlet-VAE génère données synthétiques réalistes (FID=3.2, KL=0.04), ×10 augmentation.
-                [v4 NEW] Federated : FedAvg + ε-DP=0.5, 6 labos algériens, modèle global 94.2% vs locaux 78-91%.
-                [v3] K-means (sil.0.72), RF (91.3%), LSTM (RMSE~2.8%), VAE (47 MAGs), XAI/SHAP, GNN (3 hubs), Isolation Forest, Apriori.
+            prompt = f"""Expert métagénomique senior. Niveau : {profile}. Format : {report_format}.
+            MetaInsight v4 — plateforme complète avec 12 modules ML/DL :
+            [v4 NEW] DNABERT-2 : précision 96.8% (vs RF 91.3%), 117M params, BPE tokenizer, attention multi-têtes.
+            [v4 NEW] Causal ML : DAG PC-algorithm, Do-calculus Pearl. Proteobacteria → Shannon H′ causal (ATE=0.58), Firmicutes est spurieux (confondant=Sécheresse).
+            [v4 NEW] GenAI : Dirichlet-VAE génère données synthétiques réalistes (FID=3.2, KL=0.04), ×10 augmentation.
+            [v4 NEW] Federated : FedAvg + ε-DP=0.5, 6 labos algériens, modèle global 94.2% vs locaux 78-91%.
+            [v3] K-means (sil.0.72), RF (91.3%), LSTM (RMSE~2.8%), VAE (47 MAGs), XAI/SHAP, GNN (3 hubs), Isolation Forest, Apriori.
 
-                Question : {user_question}
+            Question : {user_question}
 
-                Rapport de 300-350 mots avec sections : Apports v4 · Découvertes biologiques clés · Impact pour la métagénomique algérienne · Limites v4 · Recommandations v5."""
-                with st.spinner("Génération du rapport..."):
-                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-                st.markdown("### Rapport généré")
-                st.info(result)
-                st.download_button("📥 Télécharger le rapport", result, file_name="metaInsight_v4_rapport.txt")
+            Rapport de 300-350 mots avec sections : Apports v4 · Découvertes biologiques clés · Impact pour la métagénomique algérienne · Limites v4 · Recommandations v5."""
+            with st.spinner("Génération du rapport..."):
+                result = call_ai(
+                    prompt,
+                    st.session_state.ai_provider_selected,
+                    claude_key=st.session_state.claude_key,
+                    deepseek_key=st.session_state.deepseek_key,
+                    huggingface_key=st.session_state.huggingface_key,
+                    ollama_model=st.session_state.ollama_model
+                )
+            st.markdown("### Rapport généré")
+            st.info(result)
+            st.download_button("📥 Télécharger le rapport", result, file_name="metaInsight_v4_rapport.txt")
 
 if __name__ == "__main__":
     main()
