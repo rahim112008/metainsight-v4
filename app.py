@@ -602,48 +602,48 @@ def main():
     with tabs[5]:
         st.markdown("## 🔵 Clustering")
         st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
-         k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
-         if st.button("🚀 Lancer le clustering"):
-        # PCA pour visualisation
-        pca = PCA(n_components=2)
-        X_pca = pca.fit_transform(df[taxa_cols])
-        # K-means
-        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-        clusters = kmeans.fit_predict(X_pca)
-        # Préparation du DataFrame pour le graphique
-        df_clust = pd.DataFrame(X_pca, columns=["PC1", "PC2"])
-        df_clust["Cluster"] = clusters.astype(str)
-        # Graphique des clusters
-        fig = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster",
-                         title="Clusters sur projection PCA", template="plotly_dark")
-        st.plotly_chart(fig, use_container_width=True)
+        k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
+        if st.button("🚀 Lancer le clustering"):
+            # PCA pour visualisation
+            pca = PCA(n_components=2)
+            X_pca = pca.fit_transform(df[taxa_cols])
+            # K-means
+            kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+            clusters = kmeans.fit_predict(X_pca)
+            # Préparation du DataFrame pour le graphique
+            df_clust = pd.DataFrame(X_pca, columns=["PC1", "PC2"])
+            df_clust["Cluster"] = clusters.astype(str)
+            # Graphique des clusters
+            fig = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster",
+                             title="Clusters sur projection PCA", template="plotly_dark")
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Calcul du silhouette score avec gestion d'erreur
-        unique_labels = np.unique(clusters)
-        if len(unique_labels) < 2:
-            st.warning("Moins de 2 clusters détectés. Impossible de calculer le silhouette score.")
-        else:
-            # Vérifier si chaque cluster a au moins 2 échantillons
-            label_counts = np.bincount(clusters)
-            if np.any(label_counts < 2):
-                st.warning("Certains clusters ne contiennent qu'un seul échantillon. Le silhouette score peut être instable.")
-            try:
-                sil = silhouette_score(X_pca, clusters)
-                st.metric("Silhouette Score", f"{sil:.3f}")
-            except ValueError as e:
-                st.warning(f"Impossible de calculer le silhouette score : {e}")
+            # Calcul du silhouette score avec gestion d'erreur
+            unique_labels = np.unique(clusters)
+            if len(unique_labels) < 2:
+                st.warning("Moins de 2 clusters détectés. Impossible de calculer le silhouette score.")
+            else:
+                # Vérifier si chaque cluster a au moins 2 échantillons
+                label_counts = np.bincount(clusters)
+                if np.any(label_counts < 2):
+                    st.warning("Certains clusters ne contiennent qu'un seul échantillon. Le silhouette score peut être instable.")
+                try:
+                    sil = silhouette_score(X_pca, clusters)
+                    st.metric("Silhouette Score", f"{sil:.3f}")
+                except ValueError as e:
+                    st.warning(f"Impossible de calculer le silhouette score : {e}")
 
-        # Interprétation IA (si clés API disponibles)
-        if st.session_state.claude_key or st.session_state.deepseek_key:
-            # On récupère le score s'il a été calculé, sinon on passe un message
-            sil_score_str = f"{sil:.3f}" if 'sil' in locals() else "non calculé"
-            prompt = f"""Expert métagénomique. K-means k={k} sur 24 échantillons multi-environnements, silhouette score = {sil_score_str}. 
-            En 3 phrases : signification biologique des clusters, interprétation du silhouette score, et une limite du k-means spécifique aux données métagénomiques (sparsité, compositionnalité) avec alternative recommandée."""
-            with st.spinner("Génération de l'interprétation..."):
-                result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
-            st.info(result)
-        else:
-            st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.") 
+            # Interprétation IA (si clés API disponibles)
+            if st.session_state.claude_key or st.session_state.deepseek_key:
+                # On récupère le score s'il a été calculé, sinon on passe un message
+                sil_score_str = f"{sil:.3f}" if 'sil' in locals() else "non calculé"
+                prompt = f"""Expert métagénomique. K-means k={k} sur 24 échantillons multi-environnements, silhouette score = {sil_score_str}. 
+                En 3 phrases : signification biologique des clusters, interprétation du silhouette score, et une limite du k-means spécifique aux données métagénomiques (sparsité, compositionnalité) avec alternative recommandée."""
+                with st.spinner("Génération de l'interprétation..."):
+                    result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
+                st.info(result)
+            else:
+                st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
     # ==================== RANDOM FOREST ====================
     with tabs[6]:
