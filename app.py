@@ -599,7 +599,7 @@ def main():
                     st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
     # ==================== CLUSTERING ====================
-    with tabs[5]:
+with tabs[5]:
     st.markdown("## 🔵 Clustering")
     st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
     k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
