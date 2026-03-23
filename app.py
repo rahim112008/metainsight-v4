@@ -599,11 +599,11 @@ def main():
                     st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
 
     # ==================== CLUSTERING ====================
-with tabs[5]:
-    st.markdown("## 🔵 Clustering")
-    st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
-    k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
-    if st.button("🚀 Lancer le clustering"):
+    with tabs[5]:
+        st.markdown("## 🔵 Clustering")
+        st.markdown("K-means · DBSCAN — groupement des profils microbiens similaires")
+         k = st.slider("Nombre de clusters (k)", 2, 8, 4, key="cl_k")
+         if st.button("🚀 Lancer le clustering"):
         # PCA pour visualisation
         pca = PCA(n_components=2)
         X_pca = pca.fit_transform(df[taxa_cols])
@@ -643,7 +643,7 @@ with tabs[5]:
                 result = call_ai(prompt, st.session_state.claude_key, st.session_state.deepseek_key)
             st.info(result)
         else:
-            st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.")
+            st.warning("Aucune clé API fournie. Ajoutez une clé Claude ou DeepSeek dans la barre latérale pour obtenir une interprétation IA.") 
 
     # ==================== RANDOM FOREST ====================
     with tabs[6]:
