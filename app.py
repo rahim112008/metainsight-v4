@@ -22,6 +22,7 @@ import requests
 import os
 import hashlib
 import warnings
+import ollama
 warnings.filterwarnings('ignore')
 
 # ── Clés API : lire depuis variables d'environnement (sécurisé) ──────────────
@@ -277,21 +278,9 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
         return f"Erreur Hugging Face : {str(e)}"
 
 def call_ollama(prompt, model="llama3"):
-    """Appelle un modèle local via Ollama (service local)."""
-    url = "http://127.0.0.1:11434/api/generate"
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"num_predict": 500}
-    }
     try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        result = response.json()
-        return result.get("response", "Erreur : réponse vide")
-    except requests.exceptions.ConnectionError:
-        return "Erreur : Ollama n'est pas accessible localement. Assurez-vous que le service est lancé (ollama serve)."
+        response = ollama.generate(model=model, prompt=prompt, options={"num_predict": 500})
+        return response.get("response", "Erreur : réponse vide")
     except Exception as e:
         return f"Erreur avec Ollama : {str(e)}"
 
