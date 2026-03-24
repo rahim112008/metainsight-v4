@@ -278,7 +278,7 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
 
 def call_ollama(prompt, model="llama3"):
     """Appelle un modèle local via Ollama (service local)."""
-    url = "http://localhost:11434/api/generate"
+    url = "http://127.0.0.1:11434/api/generate"
     payload = {
         "model": model,
         "prompt": prompt,
