@@ -270,8 +270,7 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
         "inputs": prompt,
         "parameters": {"max_new_tokens": 500, "temperature": 0.7}
     }
-    # URL utilisée par l'API d'inférence gratuite (fonctionne avec les modèles publics)
-    url = f"https://api-inference.huggingface.co/models/{model}"
+    url = f"https://router.huggingface.co/hf-inference/models/{model}"
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         if response.status_code != 200:
@@ -282,7 +281,7 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
         else:
             return result.get("generated_text", "Erreur")
     except Exception as e:
-        return f"Erreur Hugging Face (exception) : {str(e)}"
+        return f"Erreur Hugging Face : {str(e)}"
 
 def call_ollama(prompt, model="llama3"):
     return "Ollama n'est pas disponible en ligne. Veuillez utiliser Hugging Face ou un autre fournisseur."
