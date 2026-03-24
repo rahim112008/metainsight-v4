@@ -262,28 +262,17 @@ def call_deepseek(prompt, api_key):
 
 # Fonction Hugging Face corrigée : modèle par défaut changé, gestion d'erreur améliorée
 def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
-    """Appelle l'API gratuite Hugging Face (token requis)."""
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": 500, "temperature": 0.7}
-    }
-    url = f"https://api-inference.huggingface.co/models/{model}"
+    """Appelle l'API Hugging Face via le client officiel."""
     try:
-        response = requests.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-        if isinstance(result, list):
-            return result[0].get("generated_text", "Erreur : pas de texte généré")
-        else:
-            return result.get("generated_text", "Erreur")
-    except requests.exceptions.HTTPError as e:
-        # Récupère le corps de l'erreur pour plus de détails
-        error_body = e.response.text
-        return f"Erreur Hugging Face ({e.response.status_code}): {error_body}"
+        client = InferenceClient(token=api_key)
+        response = client.text_generation(
+            prompt,
+            model=model,
+            max_new_tokens=500,
+            temperature=0.7,
+            do_sample=True,
+        )
+        return response
     except Exception as e:
         return f"Erreur Hugging Face : {str(e)}"
 
