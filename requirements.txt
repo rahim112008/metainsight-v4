@@ -9,7 +9,7 @@ seaborn
 requests
 networkx
 shap
-
+huggingface_hub
 
 
 
