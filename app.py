@@ -262,18 +262,27 @@ def call_deepseek(prompt, api_key):
     return result["choices"][0]["message"]["content"]
 
 def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_new_tokens": 500, "temperature": 0.7}
+    }
+    # URL utilisée par l'API d'inférence gratuite (fonctionne avec les modèles publics)
+    url = f"https://api-inference.huggingface.co/models/{model}"
     try:
-        client = InferenceClient(token=api_key)
-        response = client.text_generation(
-            prompt,
-            model=model,
-            max_new_tokens=500,
-            temperature=0.7,
-            do_sample=True,
-        )
-        return response
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        if response.status_code != 200:
+            return f"Erreur Hugging Face ({response.status_code}): {response.text}"
+        result = response.json()
+        if isinstance(result, list):
+            return result[0].get("generated_text", "Erreur : pas de texte généré")
+        else:
+            return result.get("generated_text", "Erreur")
     except Exception as e:
-        return f"Erreur Hugging Face : {str(e)}"
+        return f"Erreur Hugging Face (exception) : {str(e)}"
 
 def call_ollama(prompt, model="llama3"):
     return "Ollama n'est pas disponible en ligne. Veuillez utiliser Hugging Face ou un autre fournisseur."
