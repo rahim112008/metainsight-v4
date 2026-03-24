@@ -23,7 +23,6 @@ import requests
 import os
 import hashlib
 import warnings
-import ollama
 warnings.filterwarnings('ignore')
 
 # ── Clés API : lire depuis variables d'environnement (sécurisé) ──────────────
@@ -262,7 +261,6 @@ def call_deepseek(prompt, api_key):
     result = response.json()
     return result["choices"][0]["message"]["content"]
 
-# Fonction Hugging Face corrigée : modèle par défaut changé, gestion d'erreur améliorée
 def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
     try:
         client = InferenceClient(token=api_key)
@@ -300,7 +298,6 @@ def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_ke
         if not huggingface_key:
             return "Token Hugging Face manquant. Obtenez un token gratuit sur huggingface.co/settings/tokens."
         try:
-            # Utiliser le modèle sélectionné s'il est fourni, sinon le modèle par défaut de la fonction
             model_to_use = hf_model if hf_model else "google/gemma-2-2b-it"
             return call_huggingface(prompt, huggingface_key, model=model_to_use)
         except Exception as e:
@@ -327,9 +324,10 @@ def main():
     if "ollama_model" not in st.session_state:
         st.session_state.ollama_model = "llama3"
     if "ai_provider" not in st.session_state:
-        st.session_state.ai_provider = "Ollama"   # Par défaut, gratuit local
+        # Par défaut, utiliser Hugging Face (gratuit, token requis)
+        st.session_state.ai_provider = "Hugging Face (gratuit, token requis)"
     if "hf_model" not in st.session_state:
-        st.session_state.hf_model = "google/gemma-2-2b-it"   # modèle Hugging Face par défaut
+        st.session_state.hf_model = "google/gemma-2-2b-it"
 
     # Barre latérale
     with st.sidebar:
@@ -348,14 +346,14 @@ def main():
         st.markdown("### 🤖 Configuration IA")
         st.session_state.ai_provider = st.selectbox(
             "Fournisseur d'IA",
-            ["Ollama (local, gratuit)", "Hugging Face (gratuit, token requis)", "Claude (API)", "DeepSeek (API)"],
+            ["Hugging Face (gratuit, token requis)", "Ollama (local, gratuit)", "Claude (API)", "DeepSeek (API)"],
             index=0,
-            help="Ollama : modèle local gratuit (llama3, mistral...). Hugging Face : token gratuit sur huggingface.co."
+            help="Hugging Face : token gratuit sur huggingface.co (recommandé pour le cloud). Ollama : modèle local (fonctionne seulement en local)."
         )
         # Normaliser le nom pour l'appel
         provider_map = {
-            "Ollama (local, gratuit)": "Ollama",
             "Hugging Face (gratuit, token requis)": "Hugging Face",
+            "Ollama (local, gratuit)": "Ollama",
             "Claude (API)": "Claude",
             "DeepSeek (API)": "DeepSeek"
         }
