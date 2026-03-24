@@ -260,7 +260,8 @@ def call_deepseek(prompt, api_key):
     result = response.json()
     return result["choices"][0]["message"]["content"]
 
-def call_huggingface(prompt, api_key, model="mistralai/Mistral-7B-Instruct-v0.1"):
+# Fonction Hugging Face corrigée : modèle par défaut changé, gestion d'erreur améliorée
+def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
     """Appelle l'API gratuite Hugging Face (token requis)."""
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -271,14 +272,20 @@ def call_huggingface(prompt, api_key, model="mistralai/Mistral-7B-Instruct-v0.1"
         "parameters": {"max_new_tokens": 500, "temperature": 0.7}
     }
     url = f"https://api-inference.huggingface.co/models/{model}"
-    response = requests.post(url, json=payload, headers=headers)
-    response.raise_for_status()
-    result = response.json()
-    # Le résultat peut être une liste avec 'generated_text'
-    if isinstance(result, list):
-        return result[0].get("generated_text", "Erreur : pas de texte généré")
-    else:
-        return result.get("generated_text", "Erreur")
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+        result = response.json()
+        if isinstance(result, list):
+            return result[0].get("generated_text", "Erreur : pas de texte généré")
+        else:
+            return result.get("generated_text", "Erreur")
+    except requests.exceptions.HTTPError as e:
+        # Récupère le corps de l'erreur pour plus de détails
+        error_body = e.response.text
+        return f"Erreur Hugging Face ({e.response.status_code}): {error_body}"
+    except Exception as e:
+        return f"Erreur Hugging Face : {str(e)}"
 
 def call_ollama(prompt, model="llama3"):
     """Appelle un modèle local via Ollama (service local)."""
@@ -299,7 +306,7 @@ def call_ollama(prompt, model="llama3"):
     except Exception as e:
         return f"Erreur avec Ollama : {str(e)}"
 
-def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_key=None, ollama_model="llama3"):
+def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_key=None, ollama_model="llama3", hf_model=None):
     """Dispatch selon le fournisseur choisi."""
     if provider == "Claude":
         if not claude_key:
@@ -319,7 +326,9 @@ def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_ke
         if not huggingface_key:
             return "Token Hugging Face manquant. Obtenez un token gratuit sur huggingface.co/settings/tokens."
         try:
-            return call_huggingface(prompt, huggingface_key)
+            # Utiliser le modèle sélectionné s'il est fourni, sinon le modèle par défaut de la fonction
+            model_to_use = hf_model if hf_model else "google/gemma-2-2b-it"
+            return call_huggingface(prompt, huggingface_key, model=model_to_use)
         except Exception as e:
             return f"Erreur Hugging Face : {str(e)}"
     elif provider == "Ollama":
@@ -345,6 +354,8 @@ def main():
         st.session_state.ollama_model = "llama3"
     if "ai_provider" not in st.session_state:
         st.session_state.ai_provider = "Ollama"   # Par défaut, gratuit local
+    if "hf_model" not in st.session_state:
+        st.session_state.hf_model = "google/gemma-2-2b-it"   # modèle Hugging Face par défaut
 
     # Barre latérale
     with st.sidebar:
@@ -412,6 +423,14 @@ def main():
                     value=st.session_state.huggingface_key
                 )
             st.caption("Obtenez un token sur [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)")
+
+            # --- Sélection du modèle Hugging Face ---
+            st.session_state.hf_model = st.selectbox(
+                "Modèle Hugging Face",
+                ["google/gemma-2-2b-it", "microsoft/Phi-3-mini-4k-instruct", "HuggingFaceH4/zephyr-7b-beta"],
+                index=0,
+                help="Modèles gratuits et stables. Certains peuvent nécessiter l'acceptation des conditions sur le Hub."
+            )
         elif provider == "Ollama":
             st.session_state.ollama_model = st.text_input("Modèle Ollama", value=st.session_state.ollama_model, help="Ex: llama3, mistral, phi3")
             st.caption("Assurez-vous que le service Ollama est lancé (ollama serve) et que le modèle est installé (ollama pull llama3).")
@@ -607,7 +626,8 @@ def main():
                                      claude_key=st.session_state.claude_key,
                                      deepseek_key=st.session_state.deepseek_key,
                                      huggingface_key=st.session_state.huggingface_key,
-                                     ollama_model=st.session_state.ollama_model)
+                                     ollama_model=st.session_state.ollama_model,
+                                     hf_model=st.session_state.hf_model)
                 st.info(result)
 
     # ==================== CAUSAL ML ====================
@@ -683,7 +703,8 @@ def main():
                         claude_key=st.session_state.claude_key,
                         deepseek_key=st.session_state.deepseek_key,
                         huggingface_key=st.session_state.huggingface_key,
-                        ollama_model=st.session_state.ollama_model
+                        ollama_model=st.session_state.ollama_model,
+                        hf_model=st.session_state.hf_model
                     )
                 st.info(result)
 
@@ -752,7 +773,8 @@ def main():
                         claude_key=st.session_state.claude_key,
                         deepseek_key=st.session_state.deepseek_key,
                         huggingface_key=st.session_state.huggingface_key,
-                        ollama_model=st.session_state.ollama_model
+                        ollama_model=st.session_state.ollama_model,
+                        hf_model=st.session_state.hf_model
                     )
                 st.info(result)
 
@@ -823,7 +845,8 @@ def main():
                         claude_key=st.session_state.claude_key,
                         deepseek_key=st.session_state.deepseek_key,
                         huggingface_key=st.session_state.huggingface_key,
-                        ollama_model=st.session_state.ollama_model
+                        ollama_model=st.session_state.ollama_model,
+                        hf_model=st.session_state.hf_model
                     )
                 st.info(result)
 
@@ -866,7 +889,8 @@ def main():
                     claude_key=st.session_state.claude_key,
                     deepseek_key=st.session_state.deepseek_key,
                     huggingface_key=st.session_state.huggingface_key,
-                    ollama_model=st.session_state.ollama_model
+                    ollama_model=st.session_state.ollama_model,
+                    hf_model=st.session_state.hf_model
                 )
             st.info(result)
 
@@ -896,7 +920,8 @@ def main():
                     claude_key=st.session_state.claude_key,
                     deepseek_key=st.session_state.deepseek_key,
                     huggingface_key=st.session_state.huggingface_key,
-                    ollama_model=st.session_state.ollama_model
+                    ollama_model=st.session_state.ollama_model,
+                    hf_model=st.session_state.hf_model
                 )
             st.info(result)
 
@@ -1031,7 +1056,8 @@ def main():
                                  claude_key=st.session_state.claude_key,
                                  deepseek_key=st.session_state.deepseek_key,
                                  huggingface_key=st.session_state.huggingface_key,
-                                 ollama_model=st.session_state.ollama_model)
+                                 ollama_model=st.session_state.ollama_model,
+                                 hf_model=st.session_state.hf_model)
             st.info(result)
 
     # ==================== VAE ====================
@@ -1143,7 +1169,8 @@ def main():
                                  claude_key=st.session_state.claude_key,
                                  deepseek_key=st.session_state.deepseek_key,
                                  huggingface_key=st.session_state.huggingface_key,
-                                 ollama_model=st.session_state.ollama_model)
+                                 ollama_model=st.session_state.ollama_model,
+                                 hf_model=st.session_state.hf_model)
             st.info(result)
 
     # ==================== XAI/SHAP ====================
@@ -1176,7 +1203,8 @@ def main():
                     claude_key=st.session_state.claude_key,
                     deepseek_key=st.session_state.deepseek_key,
                     huggingface_key=st.session_state.huggingface_key,
-                    ollama_model=st.session_state.ollama_model
+                    ollama_model=st.session_state.ollama_model,
+                    hf_model=st.session_state.hf_model
                 )
             st.info(result)
 
@@ -1337,7 +1365,8 @@ def main():
                                  claude_key=st.session_state.claude_key,
                                  deepseek_key=st.session_state.deepseek_key,
                                  huggingface_key=st.session_state.huggingface_key,
-                                 ollama_model=st.session_state.ollama_model)
+                                 ollama_model=st.session_state.ollama_model,
+                                 hf_model=st.session_state.hf_model)
             st.info(result)
 
     # ==================== RAPPORT IA ====================
@@ -1369,7 +1398,8 @@ def main():
                     claude_key=st.session_state.claude_key,
                     deepseek_key=st.session_state.deepseek_key,
                     huggingface_key=st.session_state.huggingface_key,
-                    ollama_model=st.session_state.ollama_model
+                    ollama_model=st.session_state.ollama_model,
+                    hf_model=st.session_state.hf_model
                 )
             st.markdown("### Rapport généré")
             st.info(result)
