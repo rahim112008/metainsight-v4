@@ -271,7 +271,7 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
         "inputs": prompt,
         "parameters": {"max_new_tokens": 500, "temperature": 0.7}
     }
-    url = f"https://router.huggingface.co/hf-inference/models/{model}"
+    url = f"https://api-inference.huggingface.co/models/{model}"
     try:
         response = requests.post(url, json=payload, headers=headers)
         response.raise_for_status()
