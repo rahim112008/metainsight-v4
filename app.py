@@ -278,11 +278,7 @@ def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
         return f"Erreur Hugging Face : {str(e)}"
 
 def call_ollama(prompt, model="llama3"):
-    try:
-        response = ollama.generate(model=model, prompt=prompt, options={"num_predict": 500})
-        return response.get("response", "Erreur : réponse vide")
-    except Exception as e:
-        return f"Erreur avec Ollama : {str(e)}"
+    return "Ollama n'est pas disponible en ligne. Veuillez utiliser Hugging Face ou un autre fournisseur."
 
 def call_ai(prompt, provider, claude_key=None, deepseek_key=None, huggingface_key=None, ollama_model="llama3", hf_model=None):
     """Dispatch selon le fournisseur choisi."""
