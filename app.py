@@ -17,6 +17,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.cluster import KMeans
 from scipy.stats import entropy, spearmanr
 from scipy.spatial.distance import cdist
+from huggingface_hub import InferenceClient
 import networkx as nx
 import requests
 import os
@@ -263,7 +264,6 @@ def call_deepseek(prompt, api_key):
 
 # Fonction Hugging Face corrigée : modèle par défaut changé, gestion d'erreur améliorée
 def call_huggingface(prompt, api_key, model="google/gemma-2-2b-it"):
-    """Appelle l'API Hugging Face via le client officiel."""
     try:
         client = InferenceClient(token=api_key)
         response = client.text_generation(
