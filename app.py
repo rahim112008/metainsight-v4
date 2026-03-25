@@ -261,27 +261,52 @@ def plot_attention_heatmap(tokens, n_heads, taxa_corr_matrix=None):
 #  COUCHE IA — 4 FOURNISSEURS 100% GRATUITS (sans carte bancaire)
 # ════════════════════════════════════════════════════════════════════════════
 
-def call_gemini(prompt, api_key, model="gemini-1.5-flash"):
+def call_gemini(prompt, api_key, model="gemini-2.0-flash"):
     """
-    Google Gemini Flash — GRATUIT : 15 requêtes/min, 1 million tokens/jour
-    Clé gratuite sur : https://aistudio.google.com/app/apikey (connexion Google)
+    Google Gemini — GRATUIT : 15 req/min, 1M tokens/jour
+    Clé gratuite : https://aistudio.google.com/app/apikey
+    Modèles 2025 : gemini-2.0-flash, gemini-2.0-flash-lite, gemini-1.5-flash-latest
     """
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    # URL v1beta avec la clé en paramètre (format officiel 2025)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    headers = {"Content-Type": "application/json"}
+    params  = {"key": api_key}
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.7}
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "maxOutputTokens": 1000,
+            "temperature": 0.7,
+            "topP": 0.95
+        }
     }
-    response = requests.post(url, json=payload, timeout=30)
-    response.raise_for_status()
+    response = requests.post(url, json=payload, headers=headers,
+                             params=params, timeout=40)
+    if response.status_code != 200:
+        try:
+            err = response.json().get("error", {})
+            raise requests.exceptions.HTTPError(
+                f"{response.status_code} — {err.get('message', response.text[:200])}",
+                response=response)
+        except ValueError:
+            response.raise_for_status()
     result = response.json()
-    return result["candidates"][0]["content"]["parts"][0]["text"]
+    # Extraire le texte de la réponse
+    try:
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        return str(result)
 
 
-def call_groq(prompt, api_key, model="llama-3.1-8b-instant"):
+def call_groq(prompt, api_key, model="llama3-8b-8192"):
     """
-    Groq — GRATUIT : ultra-rapide (LLaMA 3.1, Mixtral, Gemma2)
-    Clé gratuite sur : https://console.groq.com/keys (inscription email)
-    Modèles gratuits : llama-3.1-8b-instant, mixtral-8x7b-32768, gemma2-9b-it
+    Groq — GRATUIT : ultra-rapide (<1 seconde)
+    Clé gratuite : https://console.groq.com/keys
+    Modèles actifs 2025 :
+      llama3-8b-8192          (LLaMA 3 8B  — rapide)
+      llama3-70b-8192         (LLaMA 3 70B — puissant)
+      llama-3.1-8b-instant    (LLaMA 3.1   — si disponible)
+      mixtral-8x7b-32768      (Mixtral)
+      gemma2-9b-it            (Google Gemma2)
     """
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -291,11 +316,21 @@ def call_groq(prompt, api_key, model="llama-3.1-8b-instant"):
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 1000,
-        "temperature": 0.7
+        "temperature": 0.7,
+        "stream": False
     }
-    response = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                             json=data, headers=headers, timeout=30)
-    response.raise_for_status()
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        json=data, headers=headers, timeout=40
+    )
+    if response.status_code != 200:
+        try:
+            err = response.json().get("error", {})
+            raise requests.exceptions.HTTPError(
+                f"{response.status_code} — {err.get('message', response.text[:300])}",
+                response=response)
+        except ValueError:
+            response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
 
@@ -365,9 +400,9 @@ def call_deepseek(prompt, api_key):
 
 def call_ai(prompt, provider,
             gemini_key=None, groq_key=None, openrouter_key=None,
-            groq_model="llama-3.1-8b-instant",
+            groq_model="llama3-8b-8192",
             openrouter_model="mistralai/mistral-7b-instruct:free",
-            gemini_model="gemini-1.5-flash",
+            gemini_model="gemini-2.0-flash",
             ollama_model="llama3",
             claude_key=None, deepseek_key=None, **kwargs):
     """Dispatch IA — priorité aux fournisseurs gratuits."""
@@ -437,11 +472,11 @@ def main():
     if "ollama_model" not in st.session_state:
         st.session_state.ollama_model = "llama3"
     if "groq_model" not in st.session_state:
-        st.session_state.groq_model = "llama-3.1-8b-instant"
+        st.session_state.groq_model = "llama3-8b-8192"
     if "openrouter_model" not in st.session_state:
         st.session_state.openrouter_model = "mistralai/mistral-7b-instruct:free"
     if "gemini_model" not in st.session_state:
-        st.session_state.gemini_model = "gemini-1.5-flash"
+        st.session_state.gemini_model = "gemini-2.0-flash"
     # Payants (conservés)
     if "claude_key" not in st.session_state:
         st.session_state.claude_key = _ENV_CLAUDE_KEY
@@ -500,9 +535,13 @@ def main():
                 placeholder="AIza...")
             st.session_state.gemini_model = st.selectbox(
                 "Modèle Gemini",
-                ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"],
-                help="Flash = le plus rapide et gratuit")
-            st.caption("✅ Gratuit : 15 req/min · 1M tokens/jour · 0 € requis")
+                ["gemini-2.0-flash",
+                 "gemini-2.0-flash-lite",
+                 "gemini-1.5-flash-latest",
+                 "gemini-1.5-flash-8b"],
+                index=0,
+                help="gemini-2.0-flash = recommandé 2025, rapide et gratuit")
+            st.caption("✅ Gratuit : 15 req/min · 1M tokens/jour · 0 € · Connexion Google")
 
         # ── Groq ─────────────────────────────────────────────────────────
         elif provider == "Groq — LLaMA 3 (GRATUIT)":
@@ -516,10 +555,14 @@ def main():
                 placeholder="gsk_...")
             st.session_state.groq_model = st.selectbox(
                 "Modèle Groq",
-                ["llama-3.1-8b-instant", "llama-3.1-70b-versatile",
-                 "mixtral-8x7b-32768", "gemma2-9b-it"],
-                help="llama-3.1-8b-instant = le plus rapide")
-            st.caption("✅ Gratuit : inscription par email · Très rapide (<1s) · 0 € requis")
+                ["llama3-8b-8192",
+                 "llama3-70b-8192",
+                 "mixtral-8x7b-32768",
+                 "gemma2-9b-it",
+                 "llama-3.1-8b-instant"],
+                index=0,
+                help="llama3-8b-8192 = recommandé 2025, ultra-rapide")
+            st.caption("✅ Gratuit : inscription email · Ultra-rapide (<1s) · 0 € · Pas de CB")
 
         # ── OpenRouter ───────────────────────────────────────────────────
         elif provider == "OpenRouter — Mistral/LLaMA (GRATUIT)":
@@ -756,9 +799,9 @@ def main():
                                      gemini_key=st.session_state.get("gemini_key",""),
                                      groq_key=st.session_state.get("groq_key",""),
                                      openrouter_key=st.session_state.get("openrouter_key",""),
-                                     groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+                                     groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
                                      openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-                                     gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+                                     gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
                                      ollama_model=st.session_state.get("ollama_model","llama3"),
                                      claude_key=st.session_state.get("claude_key",""),
                                      deepseek_key=st.session_state.get("deepseek_key",""))
@@ -837,9 +880,9 @@ def main():
                         gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -911,9 +954,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                         gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -987,9 +1030,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                         gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -1035,9 +1078,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                     gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -1070,9 +1113,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                     gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -1210,9 +1253,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                                  gemini_key=st.session_state.get("gemini_key",""),
                                  groq_key=st.session_state.get("groq_key",""),
                                  openrouter_key=st.session_state.get("openrouter_key",""),
-                                 groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+                                 groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
                                  openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-                                 gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+                                 gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
                                  ollama_model=st.session_state.get("ollama_model","llama3"),
                                  claude_key=st.session_state.get("claude_key",""),
                                  deepseek_key=st.session_state.get("deepseek_key",""))
@@ -1327,9 +1370,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                                  gemini_key=st.session_state.get("gemini_key",""),
                                  groq_key=st.session_state.get("groq_key",""),
                                  openrouter_key=st.session_state.get("openrouter_key",""),
-                                 groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+                                 groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
                                  openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-                                 gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+                                 gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
                                  ollama_model=st.session_state.get("ollama_model","llama3"),
                                  claude_key=st.session_state.get("claude_key",""),
                                  deepseek_key=st.session_state.get("deepseek_key",""))
@@ -1365,9 +1408,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                     gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
@@ -1531,9 +1574,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                                  gemini_key=st.session_state.get("gemini_key",""),
                                  groq_key=st.session_state.get("groq_key",""),
                                  openrouter_key=st.session_state.get("openrouter_key",""),
-                                 groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+                                 groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
                                  openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-                                 gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+                                 gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
                                  ollama_model=st.session_state.get("ollama_model","llama3"),
                                  claude_key=st.session_state.get("claude_key",""),
                                  deepseek_key=st.session_state.get("deepseek_key",""))
@@ -1568,9 +1611,9 @@ deepseek_key=st.session_state.get("deepseek_key","")
                     gemini_key=st.session_state.get("gemini_key",""),
 groq_key=st.session_state.get("groq_key",""),
 openrouter_key=st.session_state.get("openrouter_key",""),
-groq_model=st.session_state.get("groq_model","llama-3.1-8b-instant"),
+groq_model=st.session_state.get("groq_model","llama3-8b-8192"),
 openrouter_model=st.session_state.get("openrouter_model","mistralai/mistral-7b-instruct:free"),
-gemini_model=st.session_state.get("gemini_model","gemini-1.5-flash"),
+gemini_model=st.session_state.get("gemini_model","gemini-2.0-flash"),
 ollama_model=st.session_state.get("ollama_model","llama3"),
 claude_key=st.session_state.get("claude_key",""),
 deepseek_key=st.session_state.get("deepseek_key","")
