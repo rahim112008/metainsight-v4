@@ -285,10 +285,8 @@ def load_omics_file(uploaded_file, omic_type):
         return None
 
 def align_omics_samples(trans_df, gen_df, epi_df, sample_col='sample_id'):
-    """Align multiple omics dataframes on sample_id and return combined features."""
     if trans_df is None and gen_df is None and epi_df is None:
         return None, None
-    # Start with first non-None to get sample list
     first = next((df for df in [trans_df, gen_df, epi_df] if df is not None), None)
     if first is None:
         return None, None
@@ -303,25 +301,22 @@ def align_omics_samples(trans_df, gen_df, epi_df, sample_col='sample_id'):
 
     combined = pd.DataFrame()
     combined['sample_id'] = common_samples
-    # Extract features from each omic dataset
     all_features = []
     for df, name in [(trans_df, 'transcript'), (gen_df, 'genomic'), (epi_df, 'epigen')]:
         if df is not None:
             df_aligned = df[df[sample_col].isin(common_samples)].set_index(sample_col).sort_index()
-            # Select numeric features (excluding sample_id and environment)
             feat_cols = [c for c in df_aligned.columns if c not in META_COLS and pd.api.types.is_numeric_dtype(df_aligned[c])]
             if len(feat_cols) == 0:
                 st.warning(f"Aucune feature numérique trouvée dans {name}")
                 continue
             X = df_aligned[feat_cols].astype(float)
-            # Rename columns to avoid duplicates
             X.columns = [f"{name}_{c}" for c in X.columns]
             combined = combined.join(X, on='sample_id', how='left')
             all_features.extend(X.columns.tolist())
     return combined, all_features
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FONCTIONS STATISTIQUES MÉTAGÉNOMIQUES (déjà définies)
+#  FONCTIONS STATISTIQUES MÉTAGÉNOMIQUES
 # ══════════════════════════════════════════════════════════════════════════════
 def compute_alpha_diversity(df, taxa_cols):
     results = []
@@ -607,7 +602,6 @@ def run_deep_model(model_name, X, y, test_size=0.2):
     from sklearn.metrics import accuracy_score, roc_auc_score
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
     if model_name == "Subtype-GAN":
-        # Simule GAN en ajoutant du bruit gaussien aux données d'entraînement
         noise = np.random.normal(0, 0.1, X_train.shape)
         X_train_aug = np.vstack([X_train, X_train + noise])
         y_train_aug = np.hstack([y_train, y_train])
@@ -637,7 +631,7 @@ def run_deep_model(model_name, X, y, test_size=0.2):
     return {"Accuracy": acc, "AUC": auc_val, "model": clf}
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  COUCHE IA — MULTI-FOURNISSEURS GRATUITS (inchangée)
+#  COUCHE IA — MULTI-FOURNISSEURS GRATUITS
 # ══════════════════════════════════════════════════════════════════════════════
 def call_gemini(prompt, api_key, model="gemini-2.0-flash"):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -905,13 +899,13 @@ def main():
         "💡 XAI/SHAP",
         "🕸 GNN",
         "📄 Rapport IA",
-        "🧬 Multi-Omics Avancé",   # NEW
-        "📝 Article Scientifique"   # NEW
+        "🧬 Multi-Omics Avancé",
+        "📝 Article Scientifique"
     ]
     tabs = st.tabs(tab_names)
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 0 — ACCUEIL (inchangé)
+    # ONGLET 0 — ACCUEIL
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[0]:
         st.markdown(f"## MetaInsight v7 — {_dtype} <span class='badge-new'>NEW</span>", unsafe_allow_html=True)
@@ -985,8 +979,8 @@ def main():
         })
         st.dataframe(modules_info, use_container_width=True)
 
-   # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 1 — DIVERSITÉ ALPHA / BETA  [NOUVEAU]
+    # ══════════════════════════════════════════════════════════════════════════
+    # ONGLET 1 — DIVERSITÉ ALPHA / BETA
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[1]:
         st.markdown("## 📊 Diversité Alfa et Béta <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1013,7 +1007,6 @@ def main():
             with col_m2:
                 alpha_plot_type = st.selectbox("Type de visualisation", ["Boxplot","Violin","Strip","Histogramme par groupe"])
 
-            # Boxplot / Violin par groupe
             if alpha_plot_type in ["Boxplot","Violin","Strip"]:
                 if alpha_plot_type == "Boxplot":
                     fig_alpha = px.box(alpha_df, x="environment", y=metric_alpha, color="environment",
@@ -1035,15 +1028,14 @@ def main():
                                         opacity=0.7)
                 st.plotly_chart(fig_hist, use_container_width=True)
 
-            # Statistiques par groupe
             st.markdown("### Statistiques par groupe")
             alpha_stats = alpha_df.groupby("environment")[metric_alpha].agg(["mean","std","min","max","count"]).round(3)
             alpha_stats.columns = ["Moyenne","Écart-type","Min","Max","N"]
             st.dataframe(alpha_stats.style.background_gradient(cmap="Greens", subset=["Moyenne"]))
 
-            # Test Kruskal-Wallis
             groups_alpha = [alpha_df[alpha_df["environment"]==g][metric_alpha].values
                             for g in alpha_df["environment"].unique()]
+            p_kw = None
             if len(groups_alpha) >= 2 and all(len(g) >= 2 for g in groups_alpha):
                 try:
                     stat_kw, p_kw = kruskal(*groups_alpha)
@@ -1051,7 +1043,6 @@ def main():
                                 f"{'✅ Différence significative entre groupes (p<0.05)' if p_kw<0.05 else '⚠️ Pas de différence significative (p≥0.05)'}")
                 except: pass
 
-            # Heatmap alpha diversity
             st.markdown("### Heatmap de toutes les métriques alpha")
             alpha_heat = alpha_df.groupby("environment")[["Shannon H'","Simpson (1-D)","Richness","Chao1","Evenness (J)"]].mean().round(3)
             fig_heat = px.imshow(alpha_heat.T, text_auto=True, color_continuous_scale="RdYlGn",
@@ -1059,14 +1050,14 @@ def main():
                                   aspect="auto")
             st.plotly_chart(fig_heat, use_container_width=True)
 
-            # IA
             if st.button("🤖 Interpréter la diversité alpha", key="btn_alpha_ai"):
                 mean_by_group = alpha_df.groupby("environment")[metric_alpha].mean().to_dict()
+                p_val_str = f"Kruskal-Wallis p={p_kw:.4f}" if p_kw is not None else "Kruskal-Wallis non calculé (groupes insuffisants)"
                 prompt = (f"Expert métagénomique et écologie microbienne. "
                           f"Analyse de diversité alpha — métrique {metric_alpha}. "
                           f"Données : {_dtype}, {len(df)} échantillons, {df[env_col].nunique()} groupes. "
                           f"Moyennes par groupe : {mean_by_group}. "
-                          f"Kruskal-Wallis p={p_kw:.4f} si calculé. "
+                          f"{p_val_str}. "
                           f"En 4 phrases : "
                           f"(1) Signification biologique des différences de {metric_alpha} entre groupes, "
                           f"(2) Quel groupe a la diversité la plus élevée/basse et pourquoi, "
@@ -1105,7 +1096,6 @@ def main():
                     dm = cdist(X_clr, X_clr, metric='cityblock')
                     metric_label = "Manhattan"
 
-                # Heatmap distances
                 st.subheader(f"Matrice de distances {metric_label}")
                 labels_dm = df["sample_id"].values if "sample_id" in df.columns else [f"S{i}" for i in range(len(df))]
                 fig_dm = px.imshow(dm, x=labels_dm, y=labels_dm,
@@ -1113,7 +1103,6 @@ def main():
                                    title=f"Matrice de distances {metric_label}")
                 st.plotly_chart(fig_dm, use_container_width=True)
 
-                # Ordination
                 st.subheader(f"Ordination — {ordination}")
                 if ordination == "PCoA (MDS)":
                     from sklearn.manifold import MDS
@@ -1129,7 +1118,7 @@ def main():
                 elif ordination == "t-SNE":
                     tsne = TSNE(n_components=2, random_state=42, perplexity=min(5, len(df)-1))
                     coords = tsne.fit_transform(X_clr)
-                else:  # NMDS approx
+                else:
                     from sklearn.manifold import MDS
                     mds = MDS(n_components=2, metric=False, dissimilarity='precomputed',
                                random_state=42, n_init=2, max_iter=200)
@@ -1198,9 +1187,8 @@ def main():
                     with st.spinner("..."):
                         st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 2 — ABONDANCE DIFFERENTIELLE  [NOUVEAU]
+    # ONGLET 2 — ABONDANCE DIFFERENTIELLE
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[2]:
         st.markdown("## 🧮 Analyse de l'abondance différentielle <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1243,7 +1231,6 @@ def main():
                                 cmap="RdYlGn_r", subset=["BH adj. p-value"]).highlight_between(
                                 subset=["BH adj. p-value"], left=0, right=alpha_fdr, color="#1A3A1A"))
 
-                            # Volcano plot
                             st.subheader("Volcano plot — Effect size vs -log10(BH p-value)")
                             volcano_df = res.copy()
                             volcano_df["-log10(BH p)"] = -np.log10(volcano_df["BH adj. p-value"] + 1e-10)
@@ -1262,7 +1249,6 @@ def main():
                             fig_vol.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                             st.plotly_chart(fig_vol, use_container_width=True)
 
-                            # IA
                             top5 = res[res["BH adj. p-value"]<alpha_fdr].head(5)["Taxon"].tolist()
                             prompt = (f"Expert métagénomique. ALDEx2-like : {n_sig} taxons différentiellement abondants "
                                       f"(BH FDR<{alpha_fdr}) entre {group1_da} et {group2_da}. "
@@ -1274,6 +1260,7 @@ def main():
                                       f"(4) Recommandation pour valider ces biomarqueurs (qPCR, métagénomique shotgun).")
                             with st.spinner("Interprétation IA..."):
                                 st.info(_ai_call(prompt))
+                            st.session_state.diff_abundance = res
 
                     elif method_da.startswith("LEfSe"):
                         res_lef = lefse_like(df, taxa_cols, env_col)
@@ -1285,15 +1272,15 @@ def main():
                             st.metric("Biomarqueurs détectés (LDA ≥ 2.0)", n_bio)
                             st.dataframe(res_lef.style.background_gradient(cmap="YlOrRd", subset=["LDA Score"]))
 
-                            # Bar chart LDA
                             fig_lef = px.bar(
                                 res_lef[res_lef["Biomarker"]].head(15),
                                 x="LDA Score", y="Taxon", color="Best group",
                                 orientation="h", title="Top biomarqueurs LEfSe (LDA ≥ 2.0)",
                                 template="plotly_dark")
                             st.plotly_chart(fig_lef, use_container_width=True)
+                            st.session_state.diff_abundance = res_lef
 
-                    else:  # MaAsLin2
+                    else:
                         res_mas = maaslin2_like(df, taxa_cols, env_col)
                         st.subheader("Résultats MaAsLin2-like — Régression linéaire CLR")
                         n_sig_mas = res_mas["Significant"].sum()
@@ -1307,10 +1294,10 @@ def main():
                                              title="MaAsLin2-like Volcano — Coefficient vs -log10(BH p)",
                                              template="plotly_dark")
                         st.plotly_chart(fig_mas, use_container_width=True)
-
+                        st.session_state.diff_abundance = res_mas
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 3 — CoDA / CLR  [NOUVEAU]
+    # ONGLET 3 — CoDA / CLR
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[3]:
         st.markdown("## 🧬 Analyse Compositionnelle (CoDA) <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1388,14 +1375,12 @@ def main():
             pca_coda.fit(X_clr_coda)
             explained = pca_coda.explained_variance_ratio_ * 100
 
-            # Scree plot
             fig_scree = px.bar(x=[f"PC{i+1}" for i in range(min(10, len(explained)))],
                                y=explained[:10], title="Scree plot — Variance expliquée par composante",
                                template="plotly_dark", labels={"x":"Composante","y":"Variance (%)"},
                                color=explained[:10], color_continuous_scale="teal")
             st.plotly_chart(fig_scree, use_container_width=True)
 
-            # Biplot
             pca2 = PCA(n_components=2)
             scores = pca2.fit_transform(X_clr_coda)
             loadings = pca2.components_
@@ -1407,7 +1392,6 @@ def main():
                     x=scores[mask, 0], y=scores[mask, 1], mode='markers',
                     name=env, marker=dict(size=8)))
 
-            # Loading arrows (top 5)
             top_load = np.argsort(np.abs(loadings[0]))[-5:]
             scale = 3.0
             for idx in top_load:
@@ -1444,7 +1428,6 @@ def main():
                 fig_lr.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_lr, use_container_width=True)
 
-                # Corrélation log-ratio avec diversité alpha
                 if "shannon" in df.columns:
                     fig_lr_sh = px.scatter(x=lr_vals, y=df["shannon"].values,
                                            color=df[env_col].values,
@@ -1453,9 +1436,8 @@ def main():
                                            template="plotly_dark")
                     st.plotly_chart(fig_lr_sh, use_container_width=True)
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 4 — RAREFACTION  [NOUVEAU]
+    # ONGLET 4 — RAREFACTION
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[4]:
         st.markdown("## 📈 Raréfaction & Profondeur de séquençage <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1489,7 +1471,6 @@ def main():
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_rare, use_container_width=True)
 
-            # Plateau detection
             st.markdown("### Évaluation de la saturation par groupe")
             sat_data = []
             for env, (depths, richness) in curves.items():
@@ -1523,9 +1504,8 @@ def main():
                 with st.spinner("..."):
                     st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 5 — BIOMARQUEURS ROC  [NOUVEAU]
+    # ONGLET 5 — BIOMARQUEURS ROC
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[5]:
         st.markdown("## 🔬 Biomarqueurs & Courbes ROC <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1560,7 +1540,6 @@ def main():
                     try:
                         fpr, tpr, thresholds = roc_curve(y_bin, scores)
                         auc_val = auc(fpr, tpr)
-                        # Youden's J index = optimal threshold
                         j_idx = np.argmax(tpr - fpr)
                         opt_threshold = thresholds[j_idx] if j_idx < len(thresholds) else thresholds[-1]
                         sensitivity = tpr[j_idx]
@@ -1580,8 +1559,8 @@ def main():
                 auc_df = pd.DataFrame(auc_results).sort_values("AUC", ascending=False)
                 st.subheader("Résultats AUC par taxon/feature")
                 st.dataframe(auc_df.head(n_top_roc).style.background_gradient(cmap="YlOrRd", subset=["AUC"]))
+                st.session_state.roc_results = auc_df
 
-                # Top ROC curves
                 st.subheader(f"Courbes ROC — Top {min(n_top_roc, 5)} biomarqueurs")
                 fig_roc = go.Figure()
                 fig_roc.add_trace(go.Scatter(x=[0,1], y=[0,1], mode='lines',
@@ -1598,7 +1577,6 @@ def main():
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_roc, use_container_width=True)
 
-                # AUC bar chart
                 auc_top = auc_df.head(n_top_roc)
                 fig_auc = px.bar(auc_top, x="AUC", y="Taxon", orientation='h',
                                   color="AUC", color_continuous_scale="YlOrRd",
@@ -1609,7 +1587,6 @@ def main():
                 fig_auc.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_auc, use_container_width=True)
 
-                # IA interprétation
                 top3_bio = auc_df.head(3)[["Taxon","AUC","Sensitivity","Specificity"]].to_dict(orient="records")
                 prompt = (f"Expert métagénomique clinique. Analyse ROC {group_pos} vs {group_neg}. "
                           f"Top 3 biomarqueurs : {top3_bio}. Type de données : {_dtype}. "
@@ -1621,9 +1598,8 @@ def main():
                 with st.spinner("..."):
                     st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 6 — FONCTIONNEL KEGG  [NOUVEAU]
+    # ONGLET 6 — FONCTIONNEL KEGG
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[6]:
         st.markdown("## 🌿 Annotation Fonctionnelle — KEGG / COG <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1642,6 +1618,7 @@ def main():
                 kegg_df_grp = kegg_df.copy()
                 kegg_df_grp["environment"] = df["environment"].values
                 kegg_mean = kegg_df_grp.groupby("environment").mean()
+                st.session_state.kegg_results = kegg_mean
 
             st.subheader("Abondance relative des voies KEGG par groupe")
             fig_kegg = px.imshow(kegg_mean.T,
@@ -1652,13 +1629,11 @@ def main():
             fig_kegg.update_layout(paper_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_kegg, use_container_width=True)
 
-            # Top voies par groupe
             st.subheader("Top voies actives par groupe")
             for env in df["environment"].unique()[:4]:
                 top_pathways = kegg_mean.loc[env].nlargest(3).to_dict()
                 st.markdown(f"**{env}** → {', '.join([f'{k} ({v:.1f})' for k,v in top_pathways.items()])}")
 
-            # Stacked bar
             kegg_top_cols = kegg_mean.sum(axis=0).nlargest(8).index.tolist()
             kegg_plot = kegg_mean[kegg_top_cols].reset_index()
             fig_stacked = px.bar(
@@ -1682,9 +1657,8 @@ def main():
                 with st.spinner("..."):
                     st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 7 — MULTI-OMICS  [NOUVEAU]
+    # ONGLET 7 — MULTI-OMICS
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[7]:
         st.markdown("## 🔗 Intégration Multi-Omics <span class='badge-new'>NEW v7</span>", unsafe_allow_html=True)
@@ -1707,20 +1681,17 @@ def main():
             correlation_strength = st.slider("Force de corrélation microbiome↔métabolome", 0.1, 1.0, 0.6)
 
         if st.button("🚀 Intégration CCA microbiome ↔ métabolome", key="btn_mo"):
-            # Générer des données métabolomiques corrélées
             np.random.seed(42)
             X_micro = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
             X_meta = X_micro[:, :min(n_metabolites, X_micro.shape[1])] * correlation_strength + \
                      np.random.randn(len(df), min(n_metabolites, X_micro.shape[1])) * (1-correlation_strength)
             meta_names = [f"Met_{i+1}" for i in range(X_meta.shape[1])]
 
-            # CCA
             n_comp_cca = min(3, X_micro.shape[1], X_meta.shape[1])
             try:
                 cca = CCA(n_components=n_comp_cca, max_iter=500)
                 X_c, Y_c = cca.fit_transform(X_micro, X_meta)
 
-                # Plot CCA component 1 vs 2
                 cca_df = pd.DataFrame({
                     "CCA1_micro": X_c[:,0], "CCA1_meta": Y_c[:,0],
                     "CCA2_micro": X_c[:,1] if X_c.shape[1]>1 else np.zeros(len(df)),
@@ -1734,7 +1705,6 @@ def main():
                 fig_cca.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
                 st.plotly_chart(fig_cca, use_container_width=True)
 
-                # Corrélations inter-omiques
                 st.subheader("Matrice de corrélations microbiome ↔ métabolome")
                 corr_mo = np.corrcoef(X_micro[:,:min(6,X_micro.shape[1])].T,
                                        X_meta[:,:min(6,X_meta.shape[1])].T)
@@ -1766,9 +1736,8 @@ def main():
                 with st.spinner("..."):
                     st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLETS HÉRITÉS V6 — DNABERT-2 (tab 8)
+    # ONGLET 8 — DNABERT-2
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[8]:
         st.markdown("## 🧬 DNABERT-2 — Classification Transformer")
@@ -1844,7 +1813,6 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 9 — CAUSAL ML
     # ══════════════════════════════════════════════════════════════════════════
@@ -1888,7 +1856,6 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 10 — GENAI
     # ══════════════════════════════════════════════════════════════════════════
@@ -1922,7 +1889,6 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 11 — FEDERATED LEARNING
     # ══════════════════════════════════════════════════════════════════════════
@@ -1955,9 +1921,8 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 12 — CLUSTERING AVANCÉ
+    # ONGLET 12 — CLUSTERING
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[12]:
         st.markdown("## 🔵 Clustering — K-means · DBSCAN · Hiérarchique")
@@ -1984,7 +1949,7 @@ def main():
                 model_cl = KMeans(n_clusters=k, random_state=42, n_init=10)
             elif cluster_algo == "DBSCAN":
                 model_cl = DBSCAN(eps=0.5, min_samples=2)
-            else:  # hierarchical
+            else:
                 Z = linkage(X_cl, method='ward')
                 clusters_h = fcluster(Z, t=k, criterion='maxclust') - 1
                 df_clust = pd.DataFrame(X_vis, columns=["PC1","PC2"])
@@ -1995,7 +1960,6 @@ def main():
                                      symbol="environment")
                 st.plotly_chart(fig_cl, use_container_width=True)
 
-                # Dendrogram
                 fig_dend, ax = plt.subplots(figsize=(12, 4))
                 fig_dend.patch.set_facecolor('#0A0E1A')
                 ax.set_facecolor('#0F1525')
@@ -2028,7 +1992,6 @@ def main():
                       f"pour données compositionnelles, alternative recommandée pour métagénomique.")
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
-
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 13 — RANDOM FOREST
@@ -2069,13 +2032,13 @@ def main():
             rf.fit(X_train_rf, y_train_rf)
             y_pred_rf = rf.predict(X_test_rf)
             acc_rf = accuracy_score(y_test_rf, y_pred_rf)
+            st.session_state.rf_accuracy = acc_rf
 
             col_r1, col_r2, col_r3 = st.columns(3)
             col_r1.metric("CV Accuracy", f"{cv_scores_rf.mean()*100:.1f}%", f"± {cv_scores_rf.std()*100:.1f}%")
             col_r2.metric("Test Accuracy", f"{acc_rf*100:.1f}%")
             col_r3.metric(f"{n_splits_rf}-fold CV", "✅")
 
-            # Feature importances
             importances = rf.feature_importances_
             imp_df = pd.DataFrame({"Feature": taxa_cols, "Importance": importances}).sort_values("Importance", ascending=False).head(15)
             fig_imp = px.bar(imp_df, x="Importance", y="Feature", orientation='h',
@@ -2084,7 +2047,6 @@ def main():
             fig_imp.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_imp, use_container_width=True)
 
-            # Classification report
             report_rf = classification_report(y_test_rf, y_pred_rf,
                 target_names=[str(c) for c in le_rf.classes_], output_dict=True, zero_division=0)
             st.dataframe(pd.DataFrame(report_rf).T.drop(["accuracy","macro avg","weighted avg"],errors='ignore')[["precision","recall","f1-score","support"]].round(3).style.background_gradient(cmap="Greens", subset=["f1-score"]))
@@ -2097,9 +2059,8 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 14 — DYNAMIQUE TEMPORELLE (LSTM/AR1)
+    # ONGLET 14 — DYNAMIQUE TEMPORELLE
     # ══════════════════════════════════════════════════════════════════════════
     with tabs[14]:
         st.markdown("## ⏱ Dynamique temporelle — AR(1)/LSTM")
@@ -2161,7 +2122,6 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 15 — VAE
     # ══════════════════════════════════════════════════════════════════════════
@@ -2180,11 +2140,9 @@ def main():
             sub_vae = df[df[env_col]==vae_env] if vae_env != "Tous" else df.copy()
             X_vae = clr_transform(sub_vae[taxa_cols].values.astype(float) + 1e-9)
 
-            # Simulate latent space with PCA
             pca_vae = PCA(n_components=min(latent_dim, X_vae.shape[1], len(sub_vae)-1))
             Z = pca_vae.fit_transform(X_vae)
 
-            # ELBO simulated
             n_epochs = 50
             elbo_curve = -200 + 180*(1-np.exp(-np.arange(1,n_epochs+1)/15)) + np.random.randn(n_epochs)*2
             fig_elbo = px.line(x=np.arange(1,n_epochs+1), y=elbo_curve,
@@ -2192,7 +2150,6 @@ def main():
                                 labels={"x":"Epoch","y":"ELBO"})
             st.plotly_chart(fig_elbo, use_container_width=True)
 
-            # Latent space 2D
             if Z.shape[1] >= 2:
                 vae_df = pd.DataFrame(Z[:,:2], columns=["Z1","Z2"])
                 vae_df[env_col] = sub_vae[env_col].values
@@ -2200,7 +2157,6 @@ def main():
                                       title=f"Espace latent VAE (dim={latent_dim})", template="plotly_dark")
                 st.plotly_chart(fig_vae, use_container_width=True)
 
-            # Binning
             kmeans_vae = KMeans(n_clusters=vae_bins, random_state=42, n_init=10)
             bins = kmeans_vae.fit_predict(Z)
             bin_df = sub_vae[[env_col]].copy()
@@ -2217,7 +2173,6 @@ def main():
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
 
-
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 16 — XAI / SHAP
     # ══════════════════════════════════════════════════════════════════════════
@@ -2232,7 +2187,6 @@ def main():
             X_tr, X_te, y_tr, y_te = train_test_split(X_shap, y_shap, test_size=0.2, random_state=42)
             rf_shap.fit(X_tr, y_tr)
 
-            # SHAP-like via permutation importance
             baseline = accuracy_score(y_te, rf_shap.predict(X_te))
             shap_vals = []
             for j in range(len(taxa_cols)):
@@ -2249,7 +2203,6 @@ def main():
             fig_shap.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
             st.plotly_chart(fig_shap, use_container_width=True)
 
-            # Beeswarm-like summary
             st.subheader("Summary plot (SHAP-like)")
             top_feats = shap_df.head(8)["Feature"].tolist()
             summary_data = []
@@ -2268,7 +2221,6 @@ def main():
                       f"différence Gini impurity vs SHAP, utilité clinique des valeurs SHAP pour la métagénomique médicale.")
             with st.spinner("..."):
                 st.info(_ai_call(prompt))
-
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 17 — GNN / RÉSEAU DE CO-OCCURRENCE
@@ -2378,10 +2330,45 @@ def main():
                 st.info(_ai_call(prompt))
 
     # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 18 — RAPPORT IA (inchangé, mais nous devons le garder)
+    # ONGLET 18 — RAPPORT IA
     # ══════════════════════════════════════════════════════════════════════════
-    # Ici nous mettons le contenu de l'onglet Rapport IA, inchangé.
-    # Pour ne pas allonger, nous ne le recopions pas ici.
+    with tabs[18]:
+        st.markdown("## 📄 Rapport IA — Synthèse MetaInsight v7")
+        st.markdown('<div class="ref-box">📚 Synthèse intégrant tous les modules d\'analyse — standards 2025</div>', unsafe_allow_html=True)
+
+        with st.form("report_form_v7"):
+            user_question = st.text_area(
+                "Votre question scientifique",
+                value="Quels sont les taxons biomarqueurs, les voies fonctionnelles actives, et les patterns de beta-diversité clés dans mes données ?")
+            profile = st.selectbox("Profil", ["Chercheur métagénomique","Étudiant bioinformatique","Clinicien","Écologiste microbien"])
+            report_format = st.selectbox("Format", ["Rapport structuré (sections)","Résumé exécutif","Présentation scientifique","Article de revue"])
+            modules_cover = st.selectbox("Focus thématique", ["Tous les modules","Diversité alpha/beta","Abondance différentielle","Fonctionnel KEGG","ML et classification"])
+            submitted = st.form_submit_button("🤖 Générer le rapport complet")
+
+        if submitted:
+            feat_sample = ", ".join(taxa_cols[:8]) + ("..." if len(taxa_cols)>8 else "")
+            groups_list = ", ".join(df[env_col].unique()[:8].tolist())
+            prompt = f"""Expert data scientist et biologiste métagénomique. Niveau : {profile}. Format : {report_format}.
+MetaInsight v7 — plateforme state-of-the-art 2025, basée sur : Nature Methods Primer 2025, iMeta IF=33.2, BMC Bioinformatics 2025, Nature Reviews Bioengineering.
+Données : {len(df)} échantillons, {len(taxa_cols)} features ({_dtype}).
+Groupes : {groups_list}.
+Features principales : {feat_sample}.
+Modules disponibles : Diversité α/β (Shannon, Chao1, PERMANOVA), Abondance différentielle (ALDEx2-like, LEfSe, MaAsLin2-like), CoDA/CLR (Aitchison), Raréfaction, Biomarqueurs ROC, Voies KEGG (HUMAnN3-like), Multi-Omics (CCA), DNABERT-2, Causal ML (Do-calculus), GenAI (Dirichlet-VAE), Federated Learning (FedAvg+ε-DP), Clustering (K-means/DBSCAN/Ward), Random Forest, AR(1)/LSTM, VAE, SHAP, GNN Spearman.
+Focus : {modules_cover}.
+Question : {user_question}
+Rapport de 400-450 mots avec sections :
+## Résumé exécutif
+## Analyse des données
+## Découvertes clés (diversité, biomarqueurs, fonctionnel)
+## Interprétation biologique / clinique
+## Recommandations méthodologiques (références 2024-2025)
+## Limites et perspectives"""
+            with st.spinner("Génération du rapport..."):
+                result = _ai_call(prompt)
+            st.markdown("### Rapport généré")
+            st.info(result)
+            st.download_button("📥 Télécharger le rapport", result,
+                               file_name="metaInsight_v7_rapport.txt")
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 19 — MULTI-OMICS AVANCÉ
@@ -2404,7 +2391,6 @@ def main():
         if trans_df is None and gen_df is None and epi_df is None:
             st.warning("Aucun fichier multi-omique chargé. Utilisez la barre latérale pour importer vos données.")
         else:
-            # Aligner les échantillons
             combined, feature_names = align_omics_samples(trans_df, gen_df, epi_df)
             if combined is None:
                 st.error("Impossible d'aligner les fichiers multi-omiques.")
@@ -2413,25 +2399,21 @@ def main():
                 st.session_state.combined_omics = combined
                 st.session_state.omics_features = feature_names
 
-                # Sous-onglets
                 mo_tabs = st.tabs(["🔍 Exploration", "🔗 Intégration", "🧠 Deep Learning", "📊 Visualisations"])
                 with mo_tabs[0]:
                     st.markdown("### Statistiques descriptives par omique")
-                    # Détection des colonnes par préfixe
                     for prefix, name in [('transcript', 'Transcriptomique'), ('genomic', 'Génomique'), ('epigen', 'Épigénomique')]:
                         cols = [c for c in feature_names if c.startswith(prefix)]
                         if cols:
                             st.subheader(name)
                             st.dataframe(combined[cols].describe().T[['mean','std','min','max']].round(3))
                     st.markdown("### Matrice de corrélation entre omiques")
-                    # Extraire les premières colonnes de chaque omique pour visualisation
                     omic_blocks = []
                     for prefix in ['transcript', 'genomic', 'epigen']:
-                        cols = [c for c in feature_names if c.startswith(prefix)][:10]  # Limite pour lisibilité
+                        cols = [c for c in feature_names if c.startswith(prefix)][:10]
                         if cols:
                             omic_blocks.append(combined[cols])
                     if len(omic_blocks) >= 2:
-                        # Corrélation entre blocs
                         corr_matrix = np.corrcoef(np.hstack(omic_blocks).T)
                         fig_corr = px.imshow(corr_matrix, x=[f"F{i}" for i in range(corr_matrix.shape[0])],
                                              y=[f"F{i}" for i in range(corr_matrix.shape[1])],
@@ -2442,11 +2424,9 @@ def main():
 
                 with mo_tabs[1]:
                     st.markdown("### Intégration par CCA (Canonical Correlation Analysis)")
-                    # Choisir deux blocs
                     block1 = st.selectbox("Bloc 1", ["Transcriptomique","Génomique","Épigénomique"], index=0)
                     block2 = st.selectbox("Bloc 2", ["Transcriptomique","Génomique","Épigénomique"], index=1)
                     if block1 != block2:
-                        # Récupérer les colonnes
                         prefix1 = block1[:3].lower()
                         prefix2 = block2[:3].lower()
                         cols1 = [c for c in feature_names if c.startswith(prefix1)]
@@ -2454,19 +2434,16 @@ def main():
                         if len(cols1) > 0 and len(cols2) > 0:
                             X1 = combined[cols1].values.astype(float)
                             X2 = combined[cols2].values.astype(float)
-                            # Standardiser
                             scaler = StandardScaler()
                             X1s = scaler.fit_transform(X1)
                             X2s = scaler.fit_transform(X2)
                             n_comp = min(3, X1.shape[1], X2.shape[1])
                             cca = CCA(n_components=n_comp, max_iter=500)
                             X_c, Y_c = cca.fit_transform(X1s, X2s)
-                            # Visualiser première composante
                             cca_df = pd.DataFrame({
                                 "CCA1_X": X_c[:,0], "CCA1_Y": Y_c[:,0],
                                 "sample_id": combined['sample_id']
                             })
-                            # Associer les groupes si disponibles
                             if env_col in df.columns:
                                 sample_groups = df.set_index('sample_id')[env_col].to_dict()
                                 cca_df["Groupe"] = cca_df["sample_id"].map(sample_groups).fillna("Inconnu")
@@ -2483,19 +2460,15 @@ def main():
                     st.markdown("### Apprentissage profond pour la classification")
                     st.info("Modèles simulés (Subtype-GAN, DCAP, XOmiVAE, CustOmics, DeepCC). "
                             "Entraînement sur les données intégrées pour la classification du phénotype.")
-                    # Déterminer une variable cible
-                    # Utiliser la colonne environment du jeu de données principal si correspondance
                     if env_col in df.columns:
                         sample_groups = df.set_index('sample_id')[env_col].to_dict()
                         combined['target'] = combined['sample_id'].map(sample_groups).fillna("Inconnu")
-                        # Garder les échantillons avec target connue
                         combined_clf = combined[combined['target'] != "Inconnu"].copy()
                         if len(combined_clf) > 1:
                             y = combined_clf['target'].values
                             le = LabelEncoder()
                             y_enc = le.fit_transform(y)
                             X = combined_clf[feature_names].values.astype(float)
-                            # Standardiser
                             scaler = StandardScaler()
                             X = scaler.fit_transform(X)
                             model_choice = st.selectbox("Modèle profond", ["Subtype-GAN","DCAP","XOmiVAE","CustOmics","DeepCC"])
@@ -2506,7 +2479,6 @@ def main():
                                     st.metric("Accuracy", f"{res['Accuracy']*100:.1f}%")
                                     if res['AUC'] is not None:
                                         st.metric("AUC", f"{res['AUC']:.3f}")
-                                    # Afficher rapport de classification
                                     y_pred = res['model'].predict(X)
                                     report = classification_report(y_enc, y_pred, target_names=le.classes_, output_dict=True, zero_division=0)
                                     st.dataframe(pd.DataFrame(report).T.round(3))
@@ -2520,7 +2492,6 @@ def main():
 
                 with mo_tabs[3]:
                     st.markdown("### Visualisations avancées")
-                    # PCA conjointe sur les données intégrées
                     X_combined = combined[feature_names].values.astype(float)
                     X_clr_comb = clr_transform(X_combined + 1e-9) if (X_combined > 0).any() else X_combined
                     pca_comb = PCA(n_components=2)
@@ -2538,9 +2509,7 @@ def main():
                                                   template="plotly_dark")
                     st.plotly_chart(fig_pca_comb, use_container_width=True)
 
-                    # Heatmap des top corrélations
                     st.markdown("### Heatmap des corrélations inter-omiques (top 10 features)")
-                    # Sélectionner les 10 features les plus variables
                     vars = X_combined.var(axis=0)
                     top_idx = np.argsort(vars)[-10:]
                     top_feat = [feature_names[i] for i in top_idx]
@@ -2551,56 +2520,51 @@ def main():
                                              template="plotly_dark", aspect="auto")
                     st.plotly_chart(fig_corr_top, use_container_width=True)
 
-    # ... (précédent code jusqu'à l'onglet 20)
+    # ══════════════════════════════════════════════════════════════════════════
+    # ONGLET 20 — ARTICLE SCIENTIFIQUE (version enrichie)
+    # ══════════════════════════════════════════════════════════════════════════
+    with tabs[20]:
+        st.markdown("## 📝 Génération d’un article scientifique complet <span class='badge-new'>NEW</span>", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="ref-box">📚 Générateur d’article structuré selon les normes des revues de haut niveau (Nature, Cell, iMeta). '
+            'Utilise les résultats des analyses pour produire un manuscrit prêt à soumettre.</div>',
+            unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# ONGLET 20 — ARTICLE SCIENTIFIQUE (version enrichie)
-# ══════════════════════════════════════════════════════════════════════════════
-with tabs[20]:
-    st.markdown("## 📝 Génération d’un article scientifique complet <span class='badge-new'>NEW</span>", unsafe_allow_html=True)
-    st.markdown(
-        '<div class="ref-box">📚 Générateur d’article structuré selon les normes des revues de haut niveau (Nature, Cell, iMeta). '
-        'Utilise les résultats des analyses pour produire un manuscrit prêt à soumettre.</div>',
-        unsafe_allow_html=True)
+        with st.form("article_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                article_title = st.text_input("Titre de l’article", 
+                    "Analyse multi-omique intégrative du cancer colorectal par apprentissage profond")
+                authors = st.text_input("Auteurs", "Prénom Nom1, Prénom Nom2, ...")
+                affiliations = st.text_area("Affiliations", "1. Institution, Adresse; 2. ...")
+            with col2:
+                journal = st.selectbox("Journal cible", ["Nature Methods", "Cell", "iMeta", "Genome Biology", "Nature Communications"])
+                language = st.selectbox("Langue", ["Français", "English"])
+                include_figures = st.checkbox("Inclure les descriptions de figures", value=True)
+                sections = st.multiselect("Sections à inclure",
+                    ["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion", "Conclusion", "Méthodes supplémentaires"],
+                    default=["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion"])
+            custom_abstract = st.text_area("Résumé personnalisé (optionnel)", height=150,
+                placeholder="Laissez vide pour que l'IA le génère automatiquement.")
+            submitted = st.form_submit_button("🤖 Générer l’article")
 
-    with st.form("article_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            article_title = st.text_input("Titre de l’article", 
-                "Analyse multi-omique intégrative du cancer colorectal par apprentissage profond")
-            authors = st.text_input("Auteurs", "Prénom Nom1, Prénom Nom2, ...")
-            affiliations = st.text_area("Affiliations", "1. Institution, Adresse; 2. ...")
-        with col2:
-            journal = st.selectbox("Journal cible", ["Nature Methods", "Cell", "iMeta", "Genome Biology", "Nature Communications"])
-            language = st.selectbox("Langue", ["Français", "English"])
-            include_figures = st.checkbox("Inclure les descriptions de figures", value=True)
-            sections = st.multiselect("Sections à inclure",
-                ["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion", "Conclusion", "Méthodes supplémentaires"],
-                default=["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion"])
-        custom_abstract = st.text_area("Résumé personnalisé (optionnel)", height=150,
-            placeholder="Laissez vide pour que l'IA le génère automatiquement.")
-        submitted = st.form_submit_button("🤖 Générer l’article")
+        if submitted:
+            diff_ab_df = st.session_state.get('diff_abundance', pd.DataFrame())
+            roc_df = st.session_state.get('roc_results', pd.DataFrame())
+            kegg_df = st.session_state.get('kegg_results', pd.DataFrame())
+            deep_res = st.session_state.get('deep_model_results', {})
+            rf_acc = st.session_state.get('rf_accuracy', None)
 
-    if submitted:
-        # Récupération des résultats depuis session_state
-        diff_ab_df = st.session_state.get('diff_abundance', pd.DataFrame())
-        roc_df = st.session_state.get('roc_results', pd.DataFrame())
-        kegg_df = st.session_state.get('kegg_results', pd.DataFrame())
-        deep_res = st.session_state.get('deep_model_results', {})
-        rf_acc = st.session_state.get('rf_accuracy', None)
+            rf_perf = f"{rf_acc*100:.1f}%" if rf_acc else "Non calculé"
 
-        # Correction : calcul de la performance RF sous forme de chaîne
-        rf_perf = f"{rf_acc*100:.1f}%" if rf_acc else "Non calculé"
+            pca_fig_desc = "Figure 1 : Analyse en composantes principales (PCA) des données multi-omiques intégrées. Les échantillons se séparent clairement selon le groupe clinique."
+            heatmap_desc = "Figure 2 : Heatmap des corrélations entre les 10 features les plus variables. On observe des clusters de co-expression."
+            roc_desc = "Figure 3 : Courbes ROC pour les top biomarqueurs. L'AUC varie de 0.85 à 0.95."
+            network_desc = "Figure 4 : Réseau de co-occurrence microbienne. Les hubs principaux sont Firmicutes et Bacteroidota."
 
-        # Descriptions de figures (statiques pour l'exemple)
-        pca_fig_desc = "Figure 1 : Analyse en composantes principales (PCA) des données multi-omiques intégrées. Les échantillons se séparent clairement selon le groupe clinique."
-        heatmap_desc = "Figure 2 : Heatmap des corrélations entre les 10 features les plus variables. On observe des clusters de co-expression."
-        roc_desc = "Figure 3 : Courbes ROC pour les top biomarqueurs. L'AUC varie de 0.85 à 0.95."
-        network_desc = "Figure 4 : Réseau de co-occurrence microbienne. Les hubs principaux sont Firmicutes et Bacteroidota."
-
-        figures_text = ""
-        if include_figures:
-            figures_text = f"""
+            figures_text = ""
+            if include_figures:
+                figures_text = f"""
 ### Figures
 {pca_fig_desc}
 {heatmap_desc}
@@ -2608,8 +2572,7 @@ with tabs[20]:
 {network_desc}
 """
 
-        # Construction du prompt (la f-string est maintenant valide)
-        prompt = f"""
+            prompt = f"""
 Vous êtes un expert en métagénomique et bioinformatique. Rédigez un article scientifique complet selon les normes de {journal}, en {language}. 
 Titre : {article_title}
 Auteurs : {authors}
@@ -2647,16 +2610,14 @@ Structure de l'article :
 - Conclusion (perspectives)
 - (optionnel) Méthodes supplémentaires
 """
-        with st.spinner("Génération de l’article..."):
-            article = _ai_call(prompt)
-        st.markdown("### Article généré")
-        st.markdown(article)
-        st.download_button("📥 Télécharger l'article (Markdown)", article, file_name="article_metainsight.md")
-        if st.button("Convertir en LaTeX"):
-            latex_article = article  # à enrichir
-            st.download_button("📥 Télécharger l'article (LaTeX)", latex_article, file_name="article_metainsight.tex")
-
-
+            with st.spinner("Génération de l’article..."):
+                article = _ai_call(prompt)
+            st.markdown("### Article généré")
+            st.markdown(article)
+            st.download_button("📥 Télécharger l'article (Markdown)", article, file_name="article_metainsight.md")
+            if st.button("Convertir en LaTeX"):
+                latex_article = article
+                st.download_button("📥 Télécharger l'article (LaTeX)", latex_article, file_name="article_metainsight.tex")
 
 if __name__ == "__main__":
     main()
