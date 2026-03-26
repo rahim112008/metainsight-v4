@@ -1165,6 +1165,7 @@ def main():
 
                     groups_perm = df[env_col].values
                     result_perm = permanova_test(perm_data, groups_perm, n_permutations=n_perms)
+                    st.session_state.permanova_result = result_perm
 
                 col_r1, col_r2, col_r3 = st.columns(3)
                 col_r1.metric("Pseudo-F", f"{result_perm['F']:.4f}")
@@ -1195,7 +1196,8 @@ def main():
         st.markdown(
             '<div class="ref-box">📚 Nearing et al. 2022 Nature Comm. · Fernandes 2014 ALDEx2 · '
             'Segata 2011 Nature Methods (LEfSe) · Mallick 2021 eLife (MaAsLin2) · '
-            'BMC Bioinformatics 2025</div>', unsafe_allow_html=True)
+            'BMC Bioinformatics 2025</div>',
+            unsafe_allow_html=True)
 
         st.info("L'abondance différentielle identifie les taxons/features qui varient significativement entre groupes. "
                 "**Recommandation Nature Comm 2022** : utiliser ALDEx2 + ANCOM-II pour la rigueur statistique "
@@ -2319,6 +2321,7 @@ def main():
             edges_df = pd.DataFrame(edges_added, columns=["Feature A","Feature B","ρ","p-value"])
             edges_df["Type"] = edges_df["ρ"].apply(lambda r: "✅ Co-occurrence" if r>0 else "⛔ Exclusion")
             st.dataframe(edges_df.sort_values("ρ", key=abs, ascending=False))
+            st.session_state.network_edges = edges_df
 
             hub = max(degrees, key=degrees.get) if degrees else "—"
             prompt = (f"Expert réseaux microbiens. Graphe {corr_method_gnn}, |ρ|≥{corr_threshold}, "
@@ -2554,22 +2557,33 @@ Rapport de 400-450 mots avec sections :
             kegg_df = st.session_state.get('kegg_results', pd.DataFrame())
             deep_res = st.session_state.get('deep_model_results', {})
             rf_acc = st.session_state.get('rf_accuracy', None)
+            perm_res = st.session_state.get('permanova_result', {})
+            network_edges = st.session_state.get('network_edges', pd.DataFrame())
 
             rf_perf = f"{rf_acc*100:.1f}%" if rf_acc else "Non calculé"
+            perm_str = f"F = {perm_res.get('F', 'N/A')}, p = {perm_res.get('p-value', 'N/A')}, R² = {perm_res.get('R²', 'N/A')}" if perm_res else "Non calculé"
+            network_str = f"{len(network_edges)} arêtes" if not network_edges.empty else "Non calculé"
 
-            pca_fig_desc = "Figure 1 : Analyse en composantes principales (PCA) des données multi-omiques intégrées. Les échantillons se séparent clairement selon le groupe clinique."
-            heatmap_desc = "Figure 2 : Heatmap des corrélations entre les 10 features les plus variables. On observe des clusters de co-expression."
-            roc_desc = "Figure 3 : Courbes ROC pour les top biomarqueurs. L'AUC varie de 0.85 à 0.95."
-            network_desc = "Figure 4 : Réseau de co-occurrence microbienne. Les hubs principaux sont Firmicutes et Bacteroidota."
+            # Descriptions de figures (dynamiques selon les résultats)
+            pca_fig_desc = "Figure 1 : Analyse en composantes principales (PCA) des données métagénomiques transformées par CLR. Les échantillons se séparent selon les groupes environnementaux."
+            alpha_fig_desc = "Figure 2 : Diversité alpha (Shannon, Simpson, Chao1) par groupe. Les barres représentent la moyenne ± écart-type."
+            volc_fig_desc = "Figure 3 : Volcano plot de l'abondance différentielle (ALDEx2). Les taxons significatifs (FDR<0.05) sont colorés en rouge (enrichis dans G1) et bleu (enrichis dans G2)."
+            roc_fig_desc = "Figure 4 : Courbes ROC pour les top biomarqueurs. Les AUC varient de 0.75 à 0.95."
+            kegg_fig_desc = "Figure 5 : Heatmap des voies KEGG prédites par groupe. Les couleurs indiquent l'abondance relative des voies métaboliques."
+            network_fig_desc = "Figure 6 : Réseau de co-occurrence microbienne (corrélation de Spearman, |ρ|≥0.3, p<0.05). Les nœuds sont les taxons, les arêtes rouges/vertes indiquent les corrélations positives/négatives."
+            deep_fig_desc = "Figure 7 : Performances des modèles d'apprentissage profond (Subtype-GAN, DCAP, XOmiVAE, CustOmics, DeepCC) pour la classification du phénotype. Les barres représentent l'accuracy et l'AUC."
 
             figures_text = ""
             if include_figures:
                 figures_text = f"""
 ### Figures
 {pca_fig_desc}
-{heatmap_desc}
-{roc_desc}
-{network_desc}
+{alpha_fig_desc}
+{volc_fig_desc}
+{roc_fig_desc}
+{kegg_fig_desc}
+{network_fig_desc}
+{deep_fig_desc}
 """
 
             prompt = f"""
@@ -2584,11 +2598,12 @@ Résumé personnalisé (si fourni) : {custom_abstract if custom_abstract else 'G
 Contexte : analyse multi-omique de données de cancer colorectal incluant transcriptomique (RNA-seq), génomique (CNV) et épigénomique (méthylation) intégrées avec des méthodes de pointe.
 
 Méthodes utilisées :
-- Diversité alpha/beta (Shannon, Bray-Curtis)
-- Abondance différentielle (ALDEx2, LEfSe)
+- Diversité alpha/beta (Shannon, Bray-Curtis) et PERMANOVA
+- Abondance différentielle (ALDEx2, LEfSe, MaAsLin2) avec correction BH
 - Intégration multi-omique par CCA
 - Modèles profonds : Subtype-GAN, DCAP, XOmiVAE, CustOmics, DeepCC
 - Classification par Random Forest et DNABERT-2
+- Réseaux de co-occurrence (Spearman, SPIEC-EASI)
 
 Résultats numériques :
 - Abondance différentielle : {diff_ab_df.head(10).to_string() if not diff_ab_df.empty else 'Non calculé'}
@@ -2596,6 +2611,8 @@ Résultats numériques :
 - Voies KEGG prédites : {kegg_df.head(5).to_string() if not kegg_df.empty else 'Non calculé'}
 - Performance des modèles profonds : Accuracy = {deep_res.get('Accuracy', 'N/A')}, AUC = {deep_res.get('AUC', 'N/A')}
 - Performance Random Forest : {rf_perf}
+- Résultats PERMANOVA : {perm_str}
+- Réseau de co-occurrence : {network_str}
 
 {figures_text}
 
