@@ -1244,9 +1244,9 @@ def main():
 
         col_l, col_r = st.columns(2)
         with col_l:
-            st.plotly_chart(plot_pca(df, taxa_cols, env_col), use_container_width=True)
+            st.plotly_chart(plot_pca(df, taxa_cols, env_col), use_container_width=True, key='plotly_chart_1')
         with col_r:
-            st.plotly_chart(plot_radar(df, taxa_cols, env_col), use_container_width=True)
+            st.plotly_chart(plot_radar(df, taxa_cols, env_col), use_container_width=True, key='plotly_chart_2')
 
         st.markdown("### 📋 Résumé des données")
         col_a, col_b = st.columns(2)
@@ -1257,7 +1257,7 @@ def main():
                              color="N", color_continuous_scale="teal", template="plotly_dark")
             fig_grp.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                                    showlegend=False)
-            st.plotly_chart(fig_grp, use_container_width=True)
+            st.plotly_chart(fig_grp, use_container_width=True, key='plotly_chart_3')
         with col_b:
             feat_stats = df[taxa_cols[:10]].describe().T[["mean","std","min","max"]].round(3)
             st.dataframe(feat_stats, use_container_width=True)
@@ -1346,7 +1346,7 @@ def main():
                                           title=f"Histogramme {metric_alpha}")
             fig_alpha.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                                      showlegend=False)
-            st.plotly_chart(fig_alpha, use_container_width=True)
+            st.plotly_chart(fig_alpha, use_container_width=True, key='plotly_chart_4')
 
             # Test Kruskal-Wallis
             groups_alpha = [alpha_df[alpha_df["environment"]==g][metric_alpha].values
@@ -1407,7 +1407,7 @@ def main():
                 fig_dm = px.imshow(dm, x=labels_dm, y=labels_dm,
                                     color_continuous_scale="Blues", template="plotly_dark",
                                     title=f"Matrice de distances {beta_metric}")
-                st.plotly_chart(fig_dm, use_container_width=True)
+                st.plotly_chart(fig_dm, use_container_width=True, key='plotly_chart_5')
 
                 if ordination == "PCoA (MDS)":
                     from sklearn.manifold import MDS
@@ -1438,7 +1438,7 @@ def main():
                                       title=f"{ordination} — {beta_metric}",
                                       template="plotly_dark")
                 fig_ord.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_ord, use_container_width=True)
+                st.plotly_chart(fig_ord, use_container_width=True, key='plotly_chart_6')
 
         with subtabs[2]:
             st.markdown("### PERMANOVA / ANOSIM")
@@ -1520,7 +1520,7 @@ def main():
                                                                        "↓ Enrichi G2":"#FF5252","NS":"#7A8BA8"},
                                                   title=f"Volcano — {group1_da} vs {group2_da}",
                                                   template="plotly_dark")
-                            st.plotly_chart(fig_vol, use_container_width=True)
+                            st.plotly_chart(fig_vol, use_container_width=True, key='plotly_chart_7')
                             st.session_state.diff_abundance = res
 
                     elif method_da.startswith("LEfSe"):
@@ -1536,7 +1536,7 @@ def main():
                                               x="LDA Score", y="Taxon", color="Best group",
                                               orientation="h", title="Top biomarqueurs LEfSe",
                                               template="plotly_dark")
-                            st.plotly_chart(fig_lef, use_container_width=True)
+                            st.plotly_chart(fig_lef, use_container_width=True, key='plotly_chart_8')
                             st.session_state.diff_abundance = res_lef
                     else:
                         res_mas = maaslin2_like(df, taxa_cols, env_col)
@@ -1582,14 +1582,14 @@ def main():
                                     template="plotly_dark")
             fig_trans.update_layout(paper_bgcolor="rgba(0,0,0,0)",
                                      plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_trans, use_container_width=True)
+            st.plotly_chart(fig_trans, use_container_width=True, key='plotly_chart_9')
             st.dataframe(df_show[taxa_cols].describe().T.round(3).head(10),
                          use_container_width=True)
 
         with coda_subtabs[1]:
             st.markdown("### PCA Aitchison (CLR)")
             fig_pca_ait = plot_pca(df, taxa_cols, env_col)
-            st.plotly_chart(fig_pca_ait, use_container_width=True)
+            st.plotly_chart(fig_pca_ait, use_container_width=True, key='plotly_chart_10')
 
             X_clr2 = clr_transform(df[taxa_cols].values.astype(float) + 1e-9)
             corr_mat = pd.DataFrame(X_clr2, columns=taxa_cols).corr()
@@ -1597,7 +1597,7 @@ def main():
                                      zmin=-1, zmax=1,
                                      title="Corrélations CLR entre features",
                                      template="plotly_dark")
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            st.plotly_chart(fig_heatmap, use_container_width=True, key='plotly_chart_11')
 
         with coda_subtabs[2]:
             # CORRECTION v8: Module normalisation dédié protéomique/métabolomique
@@ -1626,7 +1626,7 @@ def main():
                                        template="plotly_dark")
                 fig_norm.update_layout(paper_bgcolor="rgba(0,0,0,0)",
                                         plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_norm, use_container_width=True)
+                st.plotly_chart(fig_norm, use_container_width=True, key='plotly_chart_12')
                 st.dataframe(df_norm.head(5).round(3), use_container_width=True)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1657,7 +1657,7 @@ def main():
                 template="plotly_dark",
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)"
             )
-            st.plotly_chart(fig_rare, use_container_width=True)
+            st.plotly_chart(fig_rare, use_container_width=True, key='plotly_chart_13')
 
             sat_data = []
             for env, (depths, richness) in curves.items():
@@ -1735,7 +1735,7 @@ def main():
                     xaxis_title="FPR (1-Spécificité)", yaxis_title="TPR (Sensibilité)",
                     template="plotly_dark",
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_roc_plot, use_container_width=True)
+                st.plotly_chart(fig_roc_plot, use_container_width=True, key='plotly_chart_14')
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 6 — FONCTIONNEL KEGG (CORRECTION v8 : API live)
@@ -1764,7 +1764,7 @@ def main():
                                   template="plotly_dark",
                                   title="Voies KEGG prédites — abondance relative par groupe",
                                   aspect="auto")
-            st.plotly_chart(fig_kegg, use_container_width=True)
+            st.plotly_chart(fig_kegg, use_container_width=True, key='plotly_chart_15')
 
             kegg_top_cols = kegg_mean.sum(axis=0).nlargest(8).index.tolist()
             if kegg_top_cols:
@@ -1777,7 +1777,7 @@ def main():
                     labels={"value":"Abondance relative","variable":"Voie KEGG"})
                 fig_stacked.update_layout(paper_bgcolor="rgba(0,0,0,0)",
                                            plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_stacked, use_container_width=True)
+                st.plotly_chart(fig_stacked, use_container_width=True, key='plotly_chart_16')
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 7 — MULTI-OMICS
@@ -1816,7 +1816,7 @@ def main():
                                       template="plotly_dark")
                 fig_cca.update_layout(paper_bgcolor="rgba(0,0,0,0)",
                                        plot_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig_cca, use_container_width=True)
+                st.plotly_chart(fig_cca, use_container_width=True, key='plotly_chart_17')
 
                 n_m = min(6, X_micro.shape[1])
                 corr_mo = np.corrcoef(X_micro[:, :n_m].T, X_meta[:, :n_m].T)
@@ -1826,7 +1826,7 @@ def main():
                                        color_continuous_scale="RdBu_r", zmin=-1, zmax=1,
                                        title="Corrélations croisées Microbiome ↔ Métabolome",
                                        template="plotly_dark")
-                st.plotly_chart(fig_cross, use_container_width=True)
+                st.plotly_chart(fig_cross, use_container_width=True, key='plotly_chart_18')
             except Exception as e:
                 st.error(f"CCA error : {e}")
 
@@ -1877,7 +1877,7 @@ def main():
                                       trendline="ols",
                                       title=f"{taxon_cause} → {taxon_effect}",
                                       template="plotly_dark")
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            st.plotly_chart(fig_scatter, use_container_width=True, key='plotly_chart_19')
 
     with tabs[10]:
         st.markdown("## ✨ GenAI — Génération de données synthétiques", unsafe_allow_html=True)
@@ -1905,7 +1905,7 @@ def main():
                                           mode='markers', name='Synthétiques',
                                           marker=dict(color='#9B7CFF', size=7, symbol='x')))
             fig_gen.update_layout(template="plotly_dark", title="PCA réels vs synthétiques")
-            st.plotly_chart(fig_gen, use_container_width=True)
+            st.plotly_chart(fig_gen, use_container_width=True, key='plotly_chart_20')
 
     with tabs[11]:
         st.markdown("## 🔒 Federated Learning — Collaboration multi-laboratoires",
@@ -1935,7 +1935,7 @@ def main():
             fig_fed.update_layout(title="Convergence fédérée", template="plotly_dark",
                                    xaxis_title="Round", yaxis_title="Précision (%)",
                                    yaxis_range=[60,100])
-            st.plotly_chart(fig_fed, use_container_width=True)
+            st.plotly_chart(fig_fed, use_container_width=True, key='plotly_chart_21')
             st.info(f"Précision finale : {global_acc[-1]:.1f}% | ε-DP = {epsilon}")
 
     with tabs[12]:
@@ -1976,7 +1976,7 @@ def main():
             fig_cl = px.scatter(df_clust, x="PC1", y="PC2", color="Cluster",
                                  title=f"Clustering {cluster_algo}", template="plotly_dark",
                                  symbol="environment")
-            st.plotly_chart(fig_cl, use_container_width=True)
+            st.plotly_chart(fig_cl, use_container_width=True, key='plotly_chart_22')
             if len(np.unique(clusters)) >= 2:
                 try:
                     sil = silhouette_score(X_cl, clusters)
@@ -2029,7 +2029,7 @@ def main():
                               title="Feature Importances (Gini) — Top 15",
                               template="plotly_dark")
             fig_imp.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_imp, use_container_width=True)
+            st.plotly_chart(fig_imp, use_container_width=True, key='plotly_chart_23')
 
     with tabs[14]:
         st.markdown("## ⏱ Dynamique temporelle — AR(1)", unsafe_allow_html=True)
@@ -2072,7 +2072,7 @@ def main():
             fig_ts.update_layout(title=f"Dynamique {taxon_ts} — AR(1)={ar1_coef:.2f}",
                                   xaxis_title="Mois", yaxis_title="Abondance (%)",
                                   template="plotly_dark")
-            st.plotly_chart(fig_ts, use_container_width=True)
+            st.plotly_chart(fig_ts, use_container_width=True, key='plotly_chart_24')
 
     with tabs[15]:
         st.markdown("## 🧩 VAE — Variational Autoencoder", unsafe_allow_html=True)
@@ -2099,7 +2099,7 @@ def main():
                 fig_vae = px.scatter(latent_df, x="z1", y="z2", color="environment",
                                       title="Espace latent VAE (MLP approx.)",
                                       template="plotly_dark")
-                st.plotly_chart(fig_vae, use_container_width=True)
+                st.plotly_chart(fig_vae, use_container_width=True, key='plotly_chart_25')
             except Exception as e:
                 # Fallback PCA
                 latent = PCA(n_components=2).fit_transform(X_vae_s)
@@ -2108,7 +2108,7 @@ def main():
                 fig_vae = px.scatter(latent_df, x="z1", y="z2", color="environment",
                                       title="Espace latent (PCA fallback)",
                                       template="plotly_dark")
-                st.plotly_chart(fig_vae, use_container_width=True)
+                st.plotly_chart(fig_vae, use_container_width=True, key='plotly_chart_26')
 
     with tabs[16]:
         st.markdown("## 💡 XAI / SHAP — Explicabilité des modèles", unsafe_allow_html=True)
@@ -2137,7 +2137,7 @@ def main():
                                error_x="Std")
             fig_shap.update_layout(paper_bgcolor="rgba(0,0,0,0)",
                                     plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_shap, use_container_width=True)
+            st.plotly_chart(fig_shap, use_container_width=True, key='plotly_chart_27')
 
     with tabs[17]:
         st.markdown("## 🕸 GNN — Réseau de co-occurrence microbienne", unsafe_allow_html=True)
@@ -2189,7 +2189,7 @@ def main():
                                    showlegend=False, template="plotly_dark",
                                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
-            st.plotly_chart(fig_gnn, use_container_width=True)
+            st.plotly_chart(fig_gnn, use_container_width=True, key='plotly_chart_28')
             st.metric("Nœuds", len(G.nodes()))
             st.metric("Arêtes", len(G.edges()))
 
@@ -2318,7 +2318,7 @@ Rapport structuré (400-500 mots) :
                             fig_cca_mo = px.scatter(cca_df_mo, x="CCA1_X", y="CCA1_Y",
                                                      title=f"CCA {block1} ↔ {block2}",
                                                      template="plotly_dark")
-                            st.plotly_chart(fig_cca_mo, use_container_width=True)
+                            st.plotly_chart(fig_cca_mo, use_container_width=True, key='plotly_chart_29')
 
                 with mo_tabs[2]:
                     # CORRECTION v8: Label honnête (MLP, pas faux noms DL)
@@ -2363,7 +2363,7 @@ Rapport structuré (400-500 mots) :
                     fig_pca_comb = px.scatter(pca_df_comb, x="PC1", y="PC2",
                                               title="PCA données multi-omiques intégrées",
                                               template="plotly_dark")
-                    st.plotly_chart(fig_pca_comb, use_container_width=True)
+                    st.plotly_chart(fig_pca_comb, use_container_width=True, key='plotly_chart_30')
 
     # ══════════════════════════════════════════════════════════════════════════
     # ONGLET 20 — ARTICLE SCIENTIFIQUE (légendes figures dynamiques)
