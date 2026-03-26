@@ -1014,6 +1014,7 @@ def main():
             # Test Kruskal-Wallis
             groups_alpha = [alpha_df[alpha_df["environment"]==g][metric_alpha].values
                             for g in alpha_df["environment"].unique()]
+            p_kw = None  # <-- INITIALISATION
             if len(groups_alpha) >= 2 and all(len(g) >= 2 for g in groups_alpha):
                 try:
                     stat_kw, p_kw = kruskal(*groups_alpha)
@@ -1032,11 +1033,13 @@ def main():
             # IA
             if st.button("🤖 Interpréter la diversité alpha", key="btn_alpha_ai"):
                 mean_by_group = alpha_df.groupby("environment")[metric_alpha].mean().to_dict()
+                # Construire la chaîne p-value selon disponibilité
+                p_val_str = f"Kruskal-Wallis p={p_kw:.4f}" if p_kw is not None else "Kruskal-Wallis non calculé (groupes insuffisants)"
                 prompt = (f"Expert métagénomique et écologie microbienne. "
                           f"Analyse de diversité alpha — métrique {metric_alpha}. "
                           f"Données : {_dtype}, {len(df)} échantillons, {df[env_col].nunique()} groupes. "
                           f"Moyennes par groupe : {mean_by_group}. "
-                          f"Kruskal-Wallis p={p_kw:.4f} si calculé. "
+                          f"{p_val_str}. "
                           f"En 4 phrases : "
                           f"(1) Signification biologique des différences de {metric_alpha} entre groupes, "
                           f"(2) Quel groupe a la diversité la plus élevée/basse et pourquoi, "
