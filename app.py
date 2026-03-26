@@ -2551,64 +2551,6 @@ def main():
                                              template="plotly_dark", aspect="auto")
                     st.plotly_chart(fig_corr_top, use_container_width=True)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # ONGLET 20 — ARTICLE SCIENTIFIQUE
-    # ══════════════════════════════════════════════════════════════════════════
-    with tabs[20]:
-        st.markdown("## 📝 Génération d’un article scientifique complet <span class='badge-new'>NEW</span>", unsafe_allow_html=True)
-        st.markdown(
-            '<div class="ref-box">📚 Générateur d’article structuré selon les normes des revues de haut niveau (Nature, Cell, iMeta). '
-            'Utilise les résultats des analyses pour produire un manuscrit prêt à soumettre.</div>',
-            unsafe_allow_html=True)
-
-        with st.form("article_form"):
-            article_title = st.text_input("Titre de l’article", "Analyse multi-omique intégrative du cancer colorectal par apprentissage profond")
-            journal = st.selectbox("Journal cible", ["Nature Methods", "Cell", "iMeta", "Genome Biology", "Nature Communications"])
-            include_figures = st.checkbox("Inclure les figures générées", value=True)
-            sections = st.multiselect("Sections à inclure",
-                ["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion", "Conclusion", "Méthodes supplémentaires"],
-                default=["Résumé", "Introduction", "Matériel et méthodes", "Résultats", "Discussion"])
-            submitted = st.form_submit_button("🤖 Générer l’article")
-
-        if submitted:
-            # Collecter les résultats stockés dans session_state
-            diff_ab_df = st.session_state.get('diff_abundance', pd.DataFrame())
-            roc_df = st.session_state.get('roc_results', pd.DataFrame())
-            kegg_df = st.session_state.get('kegg_results', pd.DataFrame())
-            deep_res = st.session_state.get('deep_model_results', {})
-            rf_acc = st.session_state.get('rf_accuracy', None)
-            # Extraire les informations pour le prompt
-            diff_text = diff_ab_df.head(5).to_string() if not diff_ab_df.empty else "Non calculé"
-            roc_text = roc_df.head(3).to_string() if not roc_df.empty else "Non calculé"
-            kegg_text = kegg_df.head(3).to_string() if not kegg_df.empty else "Non calculé"
-            deep_text = f"Accuracy: {deep_res.get('Accuracy', 'N/A')}, AUC: {deep_res.get('AUC', 'N/A')}" if deep_res else "Non calculé"
-            rf_text = f"{rf_acc*100:.1f}%" if rf_acc else "Non calculé"
-
-            prompt = f"""Écrire un article scientifique complet selon les standards de {journal} avec les sections suivantes : {sections}. 
-Titre : {article_title}.
-
-Contexte : analyse multi-omique de données de cancer colorectal incluant transcriptomique (RNA-seq), génomique (CNV) et épigénomique (méthylation) intégrées avec des méthodes de pointe.
-
-Méthodes utilisées :
-- Diversité alpha/beta (Shannon, Bray-Curtis)
-- Abondance différentielle (ALDEx2, LEfSe)
-- Intégration multi-omique par CCA
-- Modèles profonds : Subtype-GAN, DCAP, XOmiVAE, CustOmics, DeepCC
-- Classification par Random Forest et DNABERT-2
-
-Résultats clés :
-- Abondance différentielle : {diff_text}
-- Top biomarqueurs ROC : {roc_text}
-- Voies KEGG prédites : {kegg_text}
-- Performance des modèles profonds : {deep_text}
-- Performance Random Forest : {rf_text}
-
-Le style doit être formel, précis, avec des références à la littérature récente (2024-2025). Inclure des suggestions de figures (PCA, heatmap, courbes ROC) et des interprétations biologiques. Rédiger en français ou en anglais selon le journal choisi (par défaut en français)."""
-            with st.spinner("Génération de l’article..."):
-                article = _ai_call(prompt)
-            st.markdown("### Article généré")
-            st.markdown(article)
-            st.download_button("📥 Télécharger l'article (Markdown)", article, file_name="article_metainsight.md")
     # ... (précédent code jusqu'à l'onglet 20)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2711,6 +2653,8 @@ Structure de l'article :
             # Vous pouvez améliorer cette conversion
             latex_article = article  # à enrichir
             st.download_button("📥 Télécharger l'article (LaTeX)", latex_article, file_name="article_metainsight.tex")
+
+
 
 if __name__ == "__main__":
     main()
