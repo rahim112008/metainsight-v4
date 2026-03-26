@@ -10,8 +10,15 @@ requests
 networkx
 shap
 huggingface_hub
-
-
+biom-format
+h5py
+anndata
+networkx
+dask[dataframe]
+torch
+scikit-learn-extra
+ete3
+scikit-bio
 
 
 
