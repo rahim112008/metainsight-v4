@@ -2588,7 +2588,11 @@ with tabs[20]:
         kegg_df = st.session_state.get('kegg_results', pd.DataFrame())
         deep_res = st.session_state.get('deep_model_results', {})
         rf_acc = st.session_state.get('rf_accuracy', None)
-        # Descriptions de figures (à adapter selon les figures réelles générées)
+
+        # Correction : calcul de la performance RF sous forme de chaîne
+        rf_perf = f"{rf_acc*100:.1f}%" if rf_acc else "Non calculé"
+
+        # Descriptions de figures (statiques pour l'exemple)
         pca_fig_desc = "Figure 1 : Analyse en composantes principales (PCA) des données multi-omiques intégrées. Les échantillons se séparent clairement selon le groupe clinique."
         heatmap_desc = "Figure 2 : Heatmap des corrélations entre les 10 features les plus variables. On observe des clusters de co-expression."
         roc_desc = "Figure 3 : Courbes ROC pour les top biomarqueurs. L'AUC varie de 0.85 à 0.95."
@@ -2604,7 +2608,7 @@ with tabs[20]:
 {network_desc}
 """
 
-        # Construction du prompt
+        # Construction du prompt (la f-string est maintenant valide)
         prompt = f"""
 Vous êtes un expert en métagénomique et bioinformatique. Rédigez un article scientifique complet selon les normes de {journal}, en {language}. 
 Titre : {article_title}
@@ -2628,7 +2632,7 @@ Résultats numériques :
 - Top biomarqueurs ROC : {roc_df.head(5).to_string() if not roc_df.empty else 'Non calculé'}
 - Voies KEGG prédites : {kegg_df.head(5).to_string() if not kegg_df.empty else 'Non calculé'}
 - Performance des modèles profonds : Accuracy = {deep_res.get('Accuracy', 'N/A')}, AUC = {deep_res.get('AUC', 'N/A')}
-- Performance Random Forest : {rf_acc*100:.1f}% si rf_acc else 'Non calculé'}
+- Performance Random Forest : {rf_perf}
 
 {figures_text}
 
@@ -2648,9 +2652,7 @@ Structure de l'article :
         st.markdown("### Article généré")
         st.markdown(article)
         st.download_button("📥 Télécharger l'article (Markdown)", article, file_name="article_metainsight.md")
-        # Optionnel : conversion LaTeX basique
         if st.button("Convertir en LaTeX"):
-            # Vous pouvez améliorer cette conversion
             latex_article = article  # à enrichir
             st.download_button("📥 Télécharger l'article (LaTeX)", latex_article, file_name="article_metainsight.tex")
 
