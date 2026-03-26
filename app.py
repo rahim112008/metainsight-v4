@@ -174,25 +174,165 @@ def generate_demo_data():
             data.append(row)
     return pd.DataFrame(data)
 
+# ── Colonnes méta standard (non-numériques, non-features) ───────────────────
+META_COLS = {
+    "sample_id", "environment", "group", "label", "class", "condition",
+    "location", "region", "site", "collection_date", "date", "sex", "age",
+    "bmi", "diet", "antibiotiques", "probiotiques", "ethnie", "sequenceur",
+    "shannon", "simpson", "chao1", "species_richness", "classified_pct",
+    "classified_reads", "total_reads", "ph_fecal", "calprotectine",
+    "crp_mg_l", "glucose_mmol", "ph", "temperature_c", "moisture_pct",
+    "coverage_x", "qual_q30_pct", "mapping_pct", "n_variants_total",
+    "n_snps", "n_indels", "n_variants_pathogenes", "risk_score_polygénique",
+    "classif_risque", "collection_date",
+}
+
+def detect_feature_cols(df):
+    """
+    Détecte automatiquement les colonnes features.
+    Gère : microbiome (float%), génomique (A/A A/G G/G), expression (float),
+           métabolomique, protéomique, tout CSV numérique ou catégoriel encodable.
+    """
+    feature_cols = []
+    for col in df.columns:
+        col_lower = col.lower()
+
+        # ── Ignorer méta-données connues ─────────────────────────────────
+        if col_lower in META_COLS:
+            continue
+        # Ignorer zygosité (info redondante avec _GT)
+        if col.endswith("_ZYG"):
+            continue
+        # Ignorer ID et dates
+        if any(kw in col_lower for kw in ("_id","sample","date","id_")):
+            continue
+
+        col_data = df[col]
+
+        # ── Colonnes numériques ──────────────────────────────────────────
+        if pd.api.types.is_numeric_dtype(col_data):
+            # Exclure colonnes quasi-constantes (variance nulle)
+            if col_data.std() > 0:
+                feature_cols.append(col)
+
+        # ── Colonnes string / object / StringDtype ────────────────────────
+        elif (pd.api.types.is_object_dtype(col_data) or
+              pd.api.types.is_string_dtype(col_data)):
+            try:
+                unique_vals = col_data.dropna().unique()
+                n_unique = len(unique_vals)
+                # Catégorielle encodable : peu de valeurs uniques
+                if 2 <= n_unique <= 30:
+                    feature_cols.append(col)
+            except Exception:
+                pass
+
+    return feature_cols
+
+
+def detect_env_col(df):
+    """
+    Détecte automatiquement la colonne cible (groupe / environnement).
+    Priorité : environment > group > label > class > condition > première catégorielle.
+    """
+    candidates = ["environment", "group", "label", "class", "condition",
+                  "pathologie", "maladie", "disease", "type", "category"]
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # Fallback : première colonne catégorielle avec 2-50 valeurs uniques
+    for col in df.columns:
+        if df[col].dtype == object and 2 <= df[col].nunique() <= 50:
+            return col
+    return df.columns[0]
+
+
+def encode_features(df, feature_cols):
+    """
+    Encode les colonnes catégorielles (ex: génotypes) en numérique.
+    Retourne un DataFrame numérique prêt pour ML.
+    """
+    df_enc = df[feature_cols].copy()
+    for col in feature_cols:
+        if df_enc[col].dtype == object:
+            le = LabelEncoder()
+            df_enc[col] = le.fit_transform(df_enc[col].astype(str))
+    return df_enc.astype(float)
+
+
 def process_uploaded_file(uploaded_file):
-    """Charge et nettoie un fichier CSV utilisateur."""
-    df = pd.read_csv(uploaded_file)
-    if "environment" not in df.columns:
-        st.error("Le fichier doit contenir une colonne 'environment'.")
+    """
+    Charge n'importe quel CSV et s'adapte automatiquement :
+    - Microbiome (bactéries en %)
+    - Génomique (génotypes SNPs)
+    - Expression génique (FPKM/TPM)
+    - Métabolomique, protéomique, etc.
+    """
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"❌ Erreur de lecture du fichier : {e}")
         return None
-    taxa = [
-        "Proteobacteria", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Archaea",
-        "Acidobacteria", "Chloroflexi", "Planctomycetes", "Ascomycota", "Caudovirales"
-    ]
-    for tax in taxa:
-        if tax not in df.columns:
-            df[tax] = 0.0
-    if "shannon" not in df.columns:
-        df["shannon"] = df[taxa].apply(lambda row: entropy(row / row.sum(), base=2), axis=1)
+
+    if len(df) == 0:
+        st.error("❌ Le fichier est vide.")
+        return None
+
+    # ── Détecter la colonne cible ───────────────────────────────────────────
+    env_col = detect_env_col(df)
+    if env_col != "environment":
+        # Renommer pour compatibilité interne
+        df = df.rename(columns={env_col: "environment"})
+        st.info(f"ℹ️ Colonne cible détectée : **'{env_col}'** → utilisée comme groupes.")
+
+    # ── Nettoyer les valeurs manquantes ────────────────────────────────────
+    df["environment"] = df["environment"].fillna("Inconnu").astype(str)
+
+    # ── sample_id ──────────────────────────────────────────────────────────
+    if "sample_id" not in df.columns:
+        df.insert(0, "sample_id", [f"SAMP_{i+1:04d}" for i in range(len(df))])
+
+    # ── Détecter les features numériques ───────────────────────────────────
+    feat_cols = detect_feature_cols(df)
+    if len(feat_cols) == 0:
+        st.error("❌ Aucune colonne numérique (features) détectée dans le fichier.")
+        return None
+
+    # ── Encoder les features catégorielles ────────────────────────────────
+    for col in feat_cols:
+        if df[col].dtype == object:
+            gt_map = {"A/A": 2, "A/G": 1, "G/A": 1, "G/G": 0,
+                      "0/0": 0, "0/1": 1, "1/0": 1, "1/1": 2}
+            if df[col].iloc[0] in gt_map:
+                df[col] = df[col].map(gt_map).fillna(0).astype(float)
+            else:
+                le_tmp = LabelEncoder()
+                df[col] = le_tmp.fit_transform(df[col].astype(str)).astype(float)
+
+    # ── Shannon (si absent et données compositionnelles) ──────────────────
+    numeric_feat = [c for c in feat_cols if pd.api.types.is_numeric_dtype(df[c])]
+    if "shannon" not in df.columns and len(numeric_feat) >= 2:
+        feat_vals = df[numeric_feat].clip(lower=0)
+        row_sums = feat_vals.sum(axis=1)
+        valid = row_sums > 0
+        df["shannon"] = 0.0
+        if valid.any():
+            probs = feat_vals[valid].div(row_sums[valid], axis=0)
+            df.loc[valid, "shannon"] = probs.apply(
+                lambda r: float(entropy(r.values + 1e-9, base=2)), axis=1).round(4)
+
+    # ── classified_pct ─────────────────────────────────────────────────────
     if "classified_pct" not in df.columns:
         df["classified_pct"] = np.random.uniform(70, 99, size=len(df)).round(1)
-    if "sample_id" not in df.columns:
-        df["sample_id"] = [f"SAMP_{i}" for i in range(len(df))]
+
+    # ── Afficher résumé ───────────────────────────────────────────────────
+    n_groups = df["environment"].nunique()
+    st.success(
+        f"✅ **{len(df)} échantillons** chargés · "
+        f"**{len(feat_cols)} features** détectées · "
+        f"**{n_groups} groupes** : {', '.join(df['environment'].unique()[:6])}"
+        f"{'...' if n_groups > 6 else ''}"
+    )
     return df
 
 # ------------------------------
@@ -487,12 +627,32 @@ def main():
     with st.sidebar:
         st.markdown("## 🔬 MetaInsight v4")
         st.markdown("---")
-        uploaded_file = st.file_uploader("Importer vos données (CSV)", type=["csv"])
+        st.markdown("### 📂 Import de données")
+        st.markdown(
+            '<div style="background:#0A2540;border:1px solid #00D4AA;border-radius:6px;'
+            'padding:8px;font-size:0.8rem;color:#AADDDD;">'
+            '✅ Accepte <b>tout type de données</b> :<br>'
+            '🦠 Microbiome · 🧬 Génomique · 📊 Expression<br>'
+            '⚗️ Métabolomique · 🔬 Protéomique · 📁 Tout CSV'
+            '</div>', unsafe_allow_html=True)
+        st.markdown("")
+        uploaded_file = st.file_uploader(
+            "Glisser votre fichier CSV ici",
+            type=["csv","tsv","txt"],
+            help="La colonne cible (group/environment/label) est détectée automatiquement."
+        )
         if uploaded_file is not None:
-            df_uploaded = process_uploaded_file(uploaded_file)
+            # Gérer TSV
+            try:
+                sep = "\t" if uploaded_file.name.endswith((".tsv",".txt")) else ","
+                import io
+                raw = uploaded_file.read()
+                uploaded_file.seek(0)
+                df_uploaded = process_uploaded_file(uploaded_file)
+            except Exception:
+                df_uploaded = None
             if df_uploaded is not None:
                 st.session_state.df = df_uploaded
-                st.success("Données chargées !")
         if st.button("⚡ Charger données démo"):
             st.session_state.df = generate_demo_data()
             st.success("Données de démonstration chargées !")
@@ -607,12 +767,57 @@ def main():
 
         st.session_state.ai_provider_selected = provider
 
-    df = st.session_state.df
-    taxa_cols = [col for col in df.columns if col in [
-        "Proteobacteria", "Actinobacteriota", "Firmicutes", "Bacteroidota", "Archaea",
-        "Acidobacteria", "Chloroflexi", "Planctomycetes", "Ascomycota", "Caudovirales"
-    ]]
-    env_col = "environment"
+    df      = st.session_state.df
+    env_col = "environment"  # normalisé par process_uploaded_file
+
+    # ── Détection automatique des features ────────────────────────────────
+    taxa_cols = detect_feature_cols(df)
+
+    # Fallback si detect_feature_cols retourne vide (données démo)
+    if not taxa_cols:
+        taxa_cols = [c for c in df.columns if c not in
+                     {"sample_id","environment","shannon","classified_pct",
+                      "classified_reads","total_reads"} and
+                     pd.api.types.is_numeric_dtype(df[c])]
+
+    # S'assurer que toutes les features sont bien numériques
+    for col in taxa_cols:
+        if df[col].dtype == object:
+            gt_map = {"A/A":2,"A/G":1,"G/A":1,"G/G":0,"0/0":0,"0/1":1,"1/0":1,"1/1":2}
+            df[col] = df[col].map(gt_map).fillna(
+                pd.to_numeric(df[col], errors="coerce").fillna(0)).astype(float)
+
+    # Affichage sidebar — résumé données
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📊 Données actives")
+        st.markdown(
+            f"**{len(df)}** échantillons  \n"
+            f"**{len(taxa_cols)}** features  \n"
+            f"**{df[env_col].nunique()}** groupes"
+        )
+        if len(taxa_cols) > 0:
+            with st.expander("📋 Features détectées"):
+                st.write(taxa_cols[:30])
+                if len(taxa_cols) > 30:
+                    st.caption(f"... et {len(taxa_cols)-30} autres")
+
+    # ── Guard : vérifier que les features sont disponibles ──────────────────
+    if len(taxa_cols) == 0:
+        st.error(
+            "❌ **Aucune feature numérique détectée.** "
+            "Vérifiez que votre fichier CSV contient des colonnes numériques "
+            "(abondances, génotypes encodés, valeurs d'expression, etc.)."
+        )
+        st.stop()
+
+    # ── Guard : vérifier au minimum 2 groupes ─────────────────────────────
+    if df[env_col].nunique() < 2:
+        st.warning(
+            "⚠️ **Un seul groupe détecté.** "
+            "Les modules de classification nécessitent au moins 2 groupes. "
+            "Vérifiez votre colonne cible (group/environment/label)."
+        )
 
     # Création des onglets
     tab_names = [
@@ -624,18 +829,28 @@ def main():
 
     # ==================== ACCUEIL ====================
     with tabs[0]:
-        st.markdown("## MetaInsight v4")
-        st.markdown("Plateforme métagénomique de pointe — Transformers génomiques · Causal ML · Generative AI · Federated Learning")
+        # Titre dynamique selon type de données détectées
+        _n_feat = len(taxa_cols)
+        _n_grp  = df[env_col].nunique()
+        _dtype  = ("Génomique" if any("_GT" in c or c in ["BRCA1","BRCA2","TP53","APOE4"] for c in taxa_cols)
+                   else "Expression génique" if any(c.startswith(("ENS","GENE","gene_")) for c in taxa_cols)
+                   else "Microbiome" if any(c in ["Firmicutes","Proteobacteria","Bacteroidetes"] for c in taxa_cols)
+                   else "Données numériques")
+        st.markdown(f"## MetaInsight v5 — {_dtype}")
+        st.markdown(
+            f"**{len(df)} échantillons** · **{_n_feat} features** · "
+            f"**{_n_grp} groupes** · Transformers · Causal ML · Federated Learning"
+        )
         # KPIs
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown('<div class="kpi-card"><div class="kpi-value">12</div><div class="kpi-label">Modules ML/DL</div><div style="font-size:0.7rem;">+4 nouveaux</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card"><div class="kpi-value">{len(df)}</div><div class="kpi-label">Échantillons</div></div>', unsafe_allow_html=True)
         with col2:
-            st.markdown('<div class="kpi-card"><div class="kpi-value">96.8%</div><div class="kpi-label">Précision DNABERT-2</div><div style="font-size:0.7rem;">+5.5% vs RF</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card"><div class="kpi-value">{len(taxa_cols)}</div><div class="kpi-label">Features détectées</div></div>', unsafe_allow_html=True)
         with col3:
-            st.markdown('<div class="kpi-card"><div class="kpi-value">10K</div><div class="kpi-label">Données synthétiques</div><div style="font-size:0.7rem;">échantillons GenAI</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kpi-card"><div class="kpi-value">{df[env_col].nunique()}</div><div class="kpi-label">Groupes / Classes</div></div>', unsafe_allow_html=True)
         with col4:
-            st.markdown('<div class="kpi-card"><div class="kpi-value">6</div><div class="kpi-label">Nœuds fédérés</div><div style="font-size:0.7rem;">ε-DP privacy</div></div>', unsafe_allow_html=True)
+            st.markdown('<div class="kpi-card"><div class="kpi-value">12</div><div class="kpi-label">Modules ML/DL</div></div>', unsafe_allow_html=True)
 
         # Graphiques
         col1, col2 = st.columns(2)
@@ -645,22 +860,22 @@ def main():
             st.plotly_chart(plot_radar(df, taxa_cols, env_col), use_container_width=True)
 
         # Tableau comparatif
-        st.markdown("### Apports de MetaInsight v4 — comparaison des modules")
-        comp_data = [
-            ["Limite v3", "Module v4", "Technique", "Amélioration", "Source"],
-            ["Classification k-mers manuelle", "🧬 DNABERT-2", "Transformer génomique 6-mers", "+5.5% classifiés → 96.8%", "Nature Methods 2024"],
-            ["Corrélation ≠ causalité", "⚗️ Causal ML", "DAG + Do-calculus (Pearl)", "Liens causaux vs spurieux", "PNAS 2025"],
-            ["Peu d'échantillons arides", "✨ GenAI", "Dirichlet-VAE + cGAN", "×10 augmentation données", "Bioinformatics 2025"],
-            ["Données non partagées", "🔒 Federated", "FedAvg + ε-DP privacy", "Collaboration sans fuite", "Cell Systems 2025"],
-        ]
-        for row in comp_data:
-            cols = st.columns(5)
-            for i, cell in enumerate(row):
-                with cols[i]:
-                    if i == 0:
-                        st.markdown(f"**{cell}**" if i==0 else cell, unsafe_allow_html=True)
-                    else:
-                        st.write(cell)
+        st.markdown("### 📋 Résumé des données chargées")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.markdown("**Distribution des groupes**")
+            grp_counts = df[env_col].value_counts().reset_index()
+            grp_counts.columns = ["Groupe", "N"]
+            fig_grp = px.bar(grp_counts, x="N", y="Groupe", orientation="h",
+                             color="N", color_continuous_scale="teal",
+                             template="plotly_dark", height=max(200, len(grp_counts)*35))
+            fig_grp.update_layout(paper_bgcolor="rgba(0,0,0,0)",
+                                  plot_bgcolor="rgba(0,0,0,0)", showlegend=False)
+            st.plotly_chart(fig_grp, use_container_width=True)
+        with col_b:
+            st.markdown("**Statistiques des features**")
+            feat_stats = df[taxa_cols[:10]].describe().T[["mean","std","min","max"]].round(3)
+            st.dataframe(feat_stats, use_container_width=True)
 
     # ==================== DNABERT-2 ====================
     with tabs[1]:
@@ -696,21 +911,40 @@ def main():
                                         random_state=42, early_stopping=True, validation_fraction=0.15)
 
                     # Validation croisée stratifiée 5-fold
-                    cv = StratifiedKFold(n_splits=min(5, len(np.unique(y_enc))), shuffle=True, random_state=42)
-                    cv_scores = cross_val_score(clf, X_clr, y_enc, cv=cv, scoring='accuracy')
+                    # Calcul sécurisé du nombre de folds
+                    _classes, _counts = np.unique(y_enc, return_counts=True)
+                    _min_samples = int(_counts.min())          # min échantillons par classe
+                    _n_classes   = len(_classes)               # nb de classes
+                    _max_splits  = min(_min_samples, _n_classes, 5)
+                    _n_splits    = max(2, _max_splits)         # jamais < 2
+                    if _n_splits < 2:
+                        st.warning(f"⚠️ Pas assez d'échantillons par classe pour la CV "
+                                   f"(min={_min_samples}). Utilisation d'un split 80/20 simple.")
+                    cv = StratifiedKFold(n_splits=_n_splits, shuffle=True, random_state=42)
+                    if _n_splits >= 2:
+                        cv_scores = cross_val_score(clf, X_clr, y_enc, cv=cv, scoring='accuracy')
+                    else:
+                        # Pas assez de données pour CV — score = accuracy train
+                        clf.fit(X_clr, y_enc)
+                        cv_scores = np.array([accuracy_score(y_enc, clf.predict(X_clr))])
                     acc_mean = cv_scores.mean()
                     acc_std  = cv_scores.std()
 
                     # Entraînement final pour les importances
+                    # Split sécurisé : désactiver stratify si classe trop petite
+                    _use_stratify = y_enc if _min_samples >= 2 else None
                     X_train, X_test, y_train, y_test = train_test_split(
-                        X_clr, y_enc, test_size=0.2, random_state=42, stratify=y_enc)
+                        X_clr, y_enc, test_size=0.2, random_state=42,
+                        stratify=_use_stratify)
                     clf.fit(X_train, y_train)
                     y_pred = clf.predict(X_test)
                     test_acc = accuracy_score(y_test, y_pred)
 
                     # Rapport de classification par classe
                     report = classification_report(
-                        y_test, y_pred, target_names=le_db.classes_, output_dict=True)
+                        y_test, y_pred,
+                        target_names=[str(c) for c in le_db.classes_],
+                        output_dict=True, zero_division=0)
 
                     # Pourcentage de reads classifiés = % d'échantillons avec confiance > seuil
                     proba = clf.predict_proba(X_clr)
@@ -783,7 +1017,7 @@ def main():
                     f"Expert métagénomique et Transformers. "
                     f"DNABERT-2 simulé ({model_type}, {kmer}-mers, {n_heads} têtes) "
                     f"atteint {test_acc*100:.1f}% de précision (CV={acc_mean*100:.1f}% ± {acc_std*100:.1f}%) "
-                    f"sur {len(X)} échantillons ({len(taxa_cols)} taxons, {len(le_db.classes_)} environnements). "
+                    f"sur {len(X)} échantillons ({len(taxa_cols)} features, {len(le_db.classes_)} groupes). "
                     f"Random Forest baseline : {rf_acc*100:.1f}%. "
                     f"En 4 phrases : (1) Pourquoi le MLP/Transformer capture mieux les interactions non-linéaires, "
                     f"(2) Interprétation biologique du meilleur f1-score observé dans le rapport, "
@@ -1133,7 +1367,11 @@ deepseek_key=st.session_state.get("deepseek_key","")
 
         col_l1, col_l2 = st.columns(2)
         with col_l1:
-            taxon = st.selectbox("Taxon à modéliser", taxa_cols)
+            _feat_label = ("Taxon" if any(c in taxa_cols for c in
+                           ["Firmicutes","Proteobacteria","Bacteroidetes"])
+                          else "Gène" if any("_GT" in c for c in taxa_cols)
+                          else "Feature")
+            taxon = st.selectbox(f"{_feat_label} à modéliser", taxa_cols)
             pred_months = st.slider("Mois de prédiction", 1, 12, 3)
             perturbation = st.selectbox("Perturbation", ["Aucune", "Sécheresse", "Azote", "Antibiotiques"])
             env_filter = st.selectbox("Environnement de référence", ["Tous"] + list(df[env_col].unique()))
@@ -1355,7 +1593,7 @@ deepseek_key=st.session_state.get("deepseek_key","")
                 f"Expert métagénomique VAE et binning. "
                 f"{k_vae} MAGs reconstruits dont {n_hq} HQ (≥90% complétude estimée), "
                 f"{n_mq} MQ, {n_lq} LQ. Silhouette score = {sil_vae:.3f}. "
-                f"Données : {len(df)} échantillons, {len(taxa_cols)} taxons, {df[env_col].nunique()} environnements. "
+                f"Données : {len(df)} échantillons, {len(taxa_cols)} features, {df[env_col].nunique()} environnements. "
                 f"En 3 phrases : (1) Signification biologique d'un silhouette de {sil_vae:.3f} "
                 f"pour la séparabilité des génomes, "
                 f"(2) Comment les {n_hq} MAGs HQ pourraient représenter des organismes non cultivés, "
@@ -1545,13 +1783,13 @@ deepseek_key=st.session_state.get("deepseek_key","")
             # Tableau des connexions significatives
             st.subheader("Connexions significatives")
             if edges_added:
-                edges_df = pd.DataFrame(edges_added, columns=["Taxon A", "Taxon B", "ρ Spearman", "p-value"])
+                edges_df = pd.DataFrame(edges_added, columns=["Feature A", "Feature B", "ρ Spearman", "p-value"])
                 edges_df["Type"] = edges_df["ρ Spearman"].apply(
                     lambda r: "✅ Co-occurrence" if r > 0 else "⛔ Exclusion mutuelle")
                 edges_df["ρ Spearman"] = edges_df["ρ Spearman"].round(3)
                 edges_df["p-value"] = edges_df["p-value"].round(4)
                 st.dataframe(edges_df.sort_values("ρ Spearman", key=abs, ascending=False))
-                st.caption(f"💡 {len(edges_added)} interactions calculées sur vos données réelles ({env_gnn}, n={len(sub_gnn)}).")
+                st.caption(f"💡 {len(edges_added)} interactions calculées sur vos données réelles — {len(taxa_cols)} features, {len(sub_gnn)} échantillons, groupe : {env_gnn}.")
 
             hub = max(degrees, key=degrees.get) if degrees else "—"
             top3 = sorted(degrees, key=degrees.get, reverse=True)[:3]
@@ -1586,20 +1824,21 @@ deepseek_key=st.session_state.get("deepseek_key","")
             user_question = st.text_area("Votre question scientifique", value="Quels sont les apports réels de DNABERT-2 et du Causal ML par rapport aux méthodes v3 ? Que change le Federated Learning pour la métagénomique en Algérie ?")
             profile = st.selectbox("Profil", ["Chercheur métagénomique", "Étudiant bioinformatique", "Généticien", "Écologiste"])
             report_format = st.selectbox("Format", ["Rapport structuré (sections)", "Résumé exécutif", "Présentation scientifique"])
-            modules_cover = st.selectbox("Modules à couvrir", ["Tous les modules v4 (recommandé)", "Nouveaux modules v4 uniquement", "Comparaison v3 vs v4"])
+            modules_cover = st.selectbox("Modules à couvrir", ["Tous les modules (recommandé)", "Classification ML uniquement", "Causalité et interactions", "Comparaison groupes"])
             submitted = st.form_submit_button("🤖 Générer le rapport complet")
         if submitted:
-            prompt = f"""Expert métagénomique senior. Niveau : {profile}. Format : {report_format}.
-            MetaInsight v4 — plateforme complète avec 12 modules ML/DL :
-            [v4 NEW] DNABERT-2 : précision 96.8% (vs RF 91.3%), 117M params, BPE tokenizer, attention multi-têtes.
-            [v4 NEW] Causal ML : DAG PC-algorithm, Do-calculus Pearl. Proteobacteria → Shannon H′ causal (ATE=0.58), Firmicutes est spurieux (confondant=Sécheresse).
-            [v4 NEW] GenAI : Dirichlet-VAE génère données synthétiques réalistes (FID=3.2, KL=0.04), ×10 augmentation.
-            [v4 NEW] Federated : FedAvg + ε-DP=0.5, 6 labos algériens, modèle global 94.2% vs locaux 78-91%.
-            [v3] K-means (sil.0.72), RF (91.3%), LSTM (RMSE~2.8%), VAE (47 MAGs), XAI/SHAP, GNN (3 hubs), Isolation Forest, Apriori.
-
+            _feat_sample = ", ".join(taxa_cols[:8]) + ("..." if len(taxa_cols)>8 else "")
+            _groups_list = ", ".join(df[env_col].unique()[:8].tolist())
+            prompt = f"""Expert data scientist et biologiste. Niveau : {profile}. Format : {report_format}.
+            MetaInsight v5 — plateforme d'analyse universelle, {len(df)} échantillons, {len(taxa_cols)} features.
+            Type de données : {_dtype}.
+            Groupes / Classes : {_groups_list}.
+            Features principales : {_feat_sample}.
+            Modules disponibles : DNABERT-2/MLP, Causal ML (Do-calculus Pearl), GenAI (Dirichlet-VAE),
+            Federated Learning (FedAvg + ε-DP), K-means, Random Forest, LSTM/AR(1), VAE Binning, SHAP, GNN Spearman.
             Question : {user_question}
-
-            Rapport de 300-350 mots avec sections : Apports v4 · Découvertes biologiques clés · Impact pour la métagénomique algérienne · Limites v4 · Recommandations v5."""
+            Rapport de 300-350 mots avec sections :
+            Analyse des données · Découvertes clés · Interprétation biologique / clinique · Limites · Recommandations."""
             with st.spinner("Génération du rapport..."):
                 result = call_ai(
                     prompt,
