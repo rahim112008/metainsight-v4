@@ -14,7 +14,7 @@ biom-format
 h5py
 anndata
 networkx
-dask[dataframe]
+dask
 torch
 scikit-learn-extra
 ete3
